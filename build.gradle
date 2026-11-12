@@ -1,0 +1,11 @@
+plugins {
+    id 'jacoco'
+}
+
+apply plugin: 'project-report'
+
+htmlDependencyReport {
+    projects = project.allprojects
+}
+
+apply from: './main.gradle'

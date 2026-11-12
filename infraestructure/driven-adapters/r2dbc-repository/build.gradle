@@ -1,0 +1,32 @@
+// driven-adapters-r2dbc-repository: implementa los puertos de persistencia del dominio
+// (AgentGateway, PlanGateway) sobre PostgreSQL con R2DBC.
+plugins {
+    id 'io.spring.dependency-management' version '1.1.6'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.boot:spring-boot-dependencies:3.3.5"
+        mavenBom "org.testcontainers:testcontainers-bom:1.20.3"
+    }
+}
+
+dependencies {
+    implementation project(':domain-model')
+    implementation project(':helpers-r2dbc-commons')
+
+    implementation 'org.springframework.boot:spring-boot-starter-data-r2dbc'
+    runtimeOnly    'org.postgresql:r2dbc-postgresql'
+
+    // Migraciones de esquema (Flyway corre sobre JDBC; se ejecuta en el app-service).
+    implementation 'org.flywaydb:flyway-core'
+    implementation 'org.flywaydb:flyway-database-postgresql'
+
+    // Pruebas de integración contra un PostgreSQL real (Testcontainers).
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:postgresql'
+    testImplementation 'org.testcontainers:r2dbc'
+    testImplementation 'org.postgresql:postgresql'          // driver JDBC para Flyway en los tests
+    testImplementation 'org.flywaydb:flyway-core'
+}

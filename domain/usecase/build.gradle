@@ -1,0 +1,5 @@
+// domain-usecase: orquesta la lógica de negocio sobre el dominio.
+// Depende SOLO del dominio (entidades + puertos). Sin Spring, sin infraestructura.
+dependencies {
+    implementation project(':domain-model')
+}

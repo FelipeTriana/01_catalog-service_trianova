@@ -1,0 +1,72 @@
+// Configuración común a todos los módulos.
+// Java 21 vía toolchain: Gradle usa (o descarga) un JDK 21 para compilar,
+// aunque Gradle mismo corra sobre otro JDK.
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'jacoco'
+
+    group = 'com.trianova.catalog'
+    version = '0.0.1'
+
+    ext {
+        lombokVersion   = '1.18.34'
+        reactorVersion  = '3.6.11'
+        junitVersion    = '5.10.3'
+        junitPlatformVersion = '1.10.3'
+        mockitoVersion  = '5.14.2'
+    }
+
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(21)
+        }
+    }
+
+    // El proyecto tiene comentarios y strings en español (acentos, ñ). Forzamos
+    // UTF-8 en la compilación para no depender del encoding por defecto del SO
+    // (en Windows es windows-1252, que rompe los caracteres no ASCII).
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+    }
+
+    repositories {
+        mavenCentral()
+    }
+
+    dependencies {
+        compileOnly         "org.projectlombok:lombok:${lombokVersion}"
+        annotationProcessor "org.projectlombok:lombok:${lombokVersion}"
+        testCompileOnly     "org.projectlombok:lombok:${lombokVersion}"
+        testAnnotationProcessor "org.projectlombok:lombok:${lombokVersion}"
+
+        // Reactor está disponible en todos los módulos: los puertos del dominio
+        // devuelven Mono/Flux (contrato reactivo), sin acoplar a Spring.
+        implementation "io.projectreactor:reactor-core:${reactorVersion}"
+
+        testImplementation "org.junit.jupiter:junit-jupiter:${junitVersion}"
+        testImplementation "io.projectreactor:reactor-test:${reactorVersion}"
+        testImplementation "org.mockito:mockito-junit-jupiter:${mockitoVersion}"
+        testRuntimeOnly    "org.junit.platform:junit-platform-launcher:${junitPlatformVersion}"
+    }
+
+    test {
+        useJUnitPlatform()
+        systemProperty 'file.encoding', 'UTF-8'
+        testLogging {
+            events 'passed', 'skipped', 'failed'
+        }
+        finalizedBy jacocoTestReport
+    }
+
+    jacoco {
+        toolVersion = '0.8.12'
+    }
+
+    jacocoTestReport {
+        dependsOn test
+        reports {
+            xml.required = true
+            html.required = true
+        }
+    }
+}

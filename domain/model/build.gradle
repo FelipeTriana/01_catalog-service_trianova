@@ -1,0 +1,7 @@
+// domain-model: el núcleo del hexágono.
+// Java puro: entidades, objetos de valor, enums y puertos (gateways).
+// NO depende de Spring ni de ninguna infraestructura. Solo Reactor (contrato
+// reactivo de los puertos), Lombok y JUnit, que ya provee main.gradle.
+// Si algún día alguien agrega aquí una dependencia de Spring, ArchUnit debe fallar.
+dependencies {
+}

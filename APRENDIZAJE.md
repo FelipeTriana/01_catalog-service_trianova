@@ -446,3 +446,151 @@ que todos los slice tests de los sub-paquetes la encuentran.
 
 **Lección:** la clase ancla de los slice tests va en el **paquete raíz** del módulo
 de test, para que la vean todos los sub-paquetes.
+
+---
+
+## 15. Relaciones one-to-many: JPA vs. R2DBC vs. agregados
+
+Son tres capas distintas que en JPA venían mezcladas:
+
+| Capa | Qué es | En este proyecto |
+|---|---|---|
+| Modelo de base de datos | FK + relaciones 1→N | Igual que siempre: `prices.plan_id → plans.id` |
+| Mapeo objeto-tabla | Quién arma el "join" | JPA lo hacía solo (`@OneToMany`); **R2DBC no tiene esas anotaciones**: una entidad = una tabla plana, y el adaptador une a mano |
+| Agregados (DDD) | Regla de diseño | Unir **dentro** de la frontera (Plan + Price + Feature); **referenciar por id** fuera (Plan → Agent) |
+
+`priceRepository.findByPlanId(...)` es el `@OneToMany` de JPA, pero escrito de forma
+explícita. Ninguna consulta queda oculta.
+
+---
+
+## 16. La foreign key no es lo que permite consultar
+
+**Duda:** si no hay FK entre `plans` y `agents`, ¿cómo puede `findByAgentId` buscar?
+
+Una FK es una **restricción de integridad** (garantiza que el valor exista en la otra
+tabla y define qué pasa al borrar). **No** habilita las búsquedas. Se puede filtrar
+por cualquier columna, tenga FK o no:
+
+```sql
+SELECT * FROM plans WHERE agent_id = 'agent-3';
+```
+
+Spring Data deriva ese `WHERE` del **nombre del método**: `findByAgentId` →
+`WHERE agent_id = ?`. Además, ese método devuelve **planes**, nunca el `Agent`. Si
+un caso de uso necesita el agente, lo pide aparte a `AgentGateway` por su id.
+Así se cruza la frontera entre agregados: a propósito y de forma explícita.
+
+---
+
+## 17. Mappers: dentro del adaptador, no en un módulo `helpers` global
+
+Un mapper conoce **dos** tipos: el del dominio (`Price`) y el del adaptador
+(`PriceData`, específico de R2DBC). Si se mueve a un módulo `helpers` compartido,
+ese módulo pasa a depender de cada tecnología (R2DBC, Mongo, DTOs REST...) y se
+convierte en un cajón de sastre.
+
+- **Sí:** extraer el mapeo a su propia **clase** dentro del mismo módulo del
+  adaptador (`PlanDtoMapper` junto al controller, por ejemplo).
+- **No:** un módulo global con todos los mappers.
+
+Además, el mapper no "crea un objeto de más": traduce el mismo dato entre dos
+idiomas (fila de tabla ↔ objeto de negocio). Por eso hay `priceRow` (dominio → datos)
+y `priceFrom` (datos → dominio).
+
+---
+
+## 18. Atomicidad: por qué `save()` del Plan necesita una transacción
+
+`save()` ejecuta varios pasos (upsert de `plans`, borrar precios, insertar precios,
+features). Sin transacción, cada paso queda confirmado al terminar. Si falla el
+insert **después** del delete, el plan queda **sin precios**, un estado que el
+dominio nunca permitiría.
+
+Con una transacción, todo es una unidad: o se aplica completo o se revierte
+(**rollback**). En WebFlux se usa `TransactionalOperator`:
+
+```java
+.as(transactionalOperator::transactional)
+```
+
+**Pendiente:** requiere el `ReactiveTransactionManager` que aporta el `app-service`.
+
+---
+
+## 19. Upsert "check-then-act" y condiciones de carrera
+
+`upsertRoot` hace `existsById` → `update` o `insert`. Son **dos consultas
+separadas**: si dos peticiones guardan el mismo id nuevo al mismo tiempo, ambas ven
+`exists = false`, ambas hacen `INSERT` y la segunda choca con la primary key.
+
+La alternativa atómica en PostgreSQL es una sola sentencia:
+
+```sql
+INSERT INTO plans (...) VALUES (...)
+ON CONFLICT (id) DO UPDATE SET ...;
+```
+
+**Pendiente (decidido dejarlo para el final):** reemplazar el check-then-act por
+`ON CONFLICT` en Plan y Agent, con una prueba de concurrencia.
+
+---
+
+## 20. La capa web: el DTO como tercera representación
+
+El mismo precio existe ahora en tres formas, cada una en su capa:
+
+```
+JSON / DTO (PriceRequest)  ──PlanDtoMapper──▶  Price (dominio)  ──priceRow──▶  PriceData (tabla)
+```
+
+- El controller **solo traduce** HTTP ↔ caso de uso. Las reglas de negocio siguen
+  en el dominio y los casos de uso (regla de la spec).
+- Los DTOs de entrada se validan con Bean Validation (`@Valid`, `@NotBlank`,
+  `@NotNull`). Si fallan, el caso de uso **ni se llama**.
+- El monto viaja como **texto** en las respuestas (`"59900.00"`) para que ningún
+  cliente lo lea como `double` y pierda precisión.
+- `formatAmount` usa los decimales de la moneda **sin redondear nunca**: la base
+  devuelve `59900.0000` y sale `"59900.00"`; `0.0050` sale `"0.005"`, no `"0.01"`.
+
+---
+
+## 21. Errores RFC 7807 (`ProblemDetail`) y switch exhaustivo
+
+Los errores salen como `application/problem+json` con `type`, `title`, `status`,
+`detail` y `code`. Spring 6 trae `ProblemDetail`; `GlobalErrorHandler` extiende
+`ResponseEntityExceptionHandler` para que también los errores propios de Spring
+(JSON mal formado, validación) salgan en ese formato.
+
+El mapeo `BusinessException.Type → HttpStatus` vive en el adaptador web (el dominio
+no sabe qué es un 404) y usa un `switch` **sin `default`**:
+
+```java
+return switch (type) {
+    case AGENT_NOT_FOUND, PLAN_NOT_FOUND -> HttpStatus.NOT_FOUND;
+    ...
+};
+```
+
+Si se agrega un tipo nuevo al enum, el código **deja de compilar** hasta asignarle
+un código HTTP. El compilador recuerda lo que una persona podría olvidar.
+
+Un error inesperado responde 500 con un mensaje genérico. El mensaje real **solo se
+registra en el log** y nunca se envía al cliente, porque podría filtrar detalles
+internos.
+
+---
+
+## 22. Flag `-parameters` y slice test de WebFlux
+
+**`-parameters`:** `@PathVariable String id` (sin nombre explícito) necesita que el
+bytecode conserve los nombres de los parámetros. El plugin de Spring Boot agrega ese
+flag solo; este proyecto no aplica ese plugin, así que se agregó a mano en
+`main.gradle`. Sin él, desde Spring 6.1 falla **en tiempo de ejecución**, no al
+compilar.
+
+**`@WebFluxTest` vs. `@DataR2dbcTest`:** ambos son slice tests con una clase ancla en
+el paquete raíz. Diferencia: los repositorios R2DBC se descubren por
+autoconfiguración, pero los controllers se descubren por **component scan**. Por eso
+el ancla web usa `@SpringBootApplication` (incluye `@ComponentScan`) y no solo
+`@SpringBootConfiguration`.

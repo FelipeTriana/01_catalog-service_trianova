@@ -7,6 +7,7 @@ import com.trianova.catalog.domain.common.Money;
 import com.trianova.catalog.domain.common.event.EventPublisher;
 import com.trianova.catalog.domain.common.ex.BusinessException;
 import com.trianova.catalog.domain.plan.BillingCycle;
+import com.trianova.catalog.domain.plan.Feature;
 import com.trianova.catalog.domain.plan.Plan;
 import com.trianova.catalog.domain.plan.PlanStatus;
 import com.trianova.catalog.domain.plan.Price;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
@@ -24,6 +26,8 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -43,6 +47,8 @@ class PlanUseCaseTest {
 
     @BeforeEach
     void setUp() {
+        // Los mocks no ejecutan métodos default: se delega en la implementación real del puerto.
+        lenient().when(agentGateway.findByIdOrSlug(anyString())).thenCallRealMethod();
         useCase = new PlanUseCase(planGateway, agentGateway, eventPublisher);
     }
 
@@ -118,6 +124,54 @@ class PlanUseCaseTest {
                 .expectErrorMatches(e -> e instanceof BusinessException be
                         && be.getType() == BusinessException.Type.PLAN_HAS_NO_VALID_PRICE)
                 .verify();
+    }
+
+    @Test
+    void findPublishedPlansResolvesSlugAndReturnsAgentId() {
+        Agent published = Agent.builder().id("a1").slug("asistente-ventas").name("n")
+                .status(AgentStatus.PUBLISHED).build();
+        when(agentGateway.findById("asistente-ventas")).thenReturn(Mono.empty());
+        when(agentGateway.findBySlug("asistente-ventas")).thenReturn(Mono.just(published));
+        when(planGateway.findPublishedByAgentId("a1")).thenReturn(Flux.just(draftPlanWithPrice()));
+
+        StepVerifier.create(useCase.findPublishedPlans("asistente-ventas"))
+                .expectNextMatches(r -> r.agentId().equals("a1") && r.plans().size() == 1)
+                .verifyComplete();
+    }
+
+    @Test
+    void findPublishedPlansOfDraftAgentFailsAsNotFound() {
+        Agent draft = Agent.builder().id("a1").slug("s").name("n").status(AgentStatus.DRAFT).build();
+        when(agentGateway.findById("a1")).thenReturn(Mono.just(draft));
+
+        StepVerifier.create(useCase.findPublishedPlans("a1"))
+                .expectErrorMatches(e -> e instanceof BusinessException be
+                        && be.getType() == BusinessException.Type.AGENT_NOT_FOUND)
+                .verify();
+
+        verify(planGateway, never()).findPublishedByAgentId(any());
+    }
+
+    @Test
+    void updatePlanReplacesNameDescriptionAndFeaturesButKeepsPrices() {
+        Plan existing = draftPlanWithPrice().toBuilder()
+                .feature(new Feature("OLD", "Old", null, null))
+                .build();
+        Plan data = Plan.builder()
+                .name("Pro Plus").description("Nueva")
+                .feature(new Feature("MAX_RUNS", "Ejecuciones/mes", null, "10000"))
+                .build();
+        when(planGateway.findById("p1")).thenReturn(Mono.just(existing));
+        when(planGateway.save(any(Plan.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+
+        StepVerifier.create(useCase.updatePlan("p1", data))
+                .expectNextMatches(p -> p.getName().equals("Pro Plus")
+                        && p.getDescription().equals("Nueva")
+                        && p.getFeatures().size() == 1
+                        && p.getFeatures().get(0).code().equals("MAX_RUNS")
+                        && p.getPrices().size() == 1
+                        && p.getUpdatedAt() != null)
+                .verifyComplete();
     }
 
     @Test

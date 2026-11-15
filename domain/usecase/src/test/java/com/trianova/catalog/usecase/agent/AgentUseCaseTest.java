@@ -19,6 +19,8 @@ import reactor.test.StepVerifier;
 import java.time.Instant;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -33,6 +35,8 @@ class AgentUseCaseTest {
 
     @BeforeEach
     void setUp() {
+        // Los mocks no ejecutan métodos default: se delega en la implementación real del puerto.
+        lenient().when(agentGateway.findByIdOrSlug(anyString())).thenCallRealMethod();
         useCase = new AgentUseCase(agentGateway, planGateway);
     }
 
@@ -67,6 +71,27 @@ class AgentUseCaseTest {
         StepVerifier.create(useCase.findAgent("asistente-ventas"))
                 .expectNextCount(1)
                 .verifyComplete();
+    }
+
+    @Test
+    void findPublishedAgentReturnsPublishedAgentBySlug() {
+        when(agentGateway.findById("asistente-ventas")).thenReturn(Mono.empty());
+        when(agentGateway.findBySlug("asistente-ventas"))
+                .thenReturn(Mono.just(draftAgent().toBuilder().status(AgentStatus.PUBLISHED).build()));
+
+        StepVerifier.create(useCase.findPublishedAgent("asistente-ventas"))
+                .expectNextMatches(a -> a.getStatus() == AgentStatus.PUBLISHED)
+                .verifyComplete();
+    }
+
+    @Test
+    void findPublishedAgentHidesDraftAsNotFound() {
+        when(agentGateway.findById("a1")).thenReturn(Mono.just(draftAgent()));
+
+        StepVerifier.create(useCase.findPublishedAgent("a1"))
+                .expectErrorMatches(e -> e instanceof BusinessException be
+                        && be.getType() == BusinessException.Type.AGENT_NOT_FOUND)
+                .verify();
     }
 
     @Test

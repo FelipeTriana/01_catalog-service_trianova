@@ -31,9 +31,19 @@ public class AgentUseCase {
         return agentGateway.findAll();
     }
 
+    /** Cualquier estado. Uso administrativo. */
     public Mono<Agent> findAgent(String idOrSlug) {
-        return agentGateway.findById(idOrSlug)
-                .switchIfEmpty(Mono.defer(() -> agentGateway.findBySlug(idOrSlug)))
+        return agentGateway.findByIdOrSlug(idOrSlug)
+                .switchIfEmpty(Mono.error(BusinessException.Type.AGENT_NOT_FOUND.defer()));
+    }
+
+    /**
+     * Solo agentes publicados, para el catálogo público. Un borrador o archivado
+     * responde AGENT_NOT_FOUND para no revelar que existe.
+     */
+    public Mono<Agent> findPublishedAgent(String idOrSlug) {
+        return agentGateway.findByIdOrSlug(idOrSlug)
+                .filter(agent -> agent.getStatus() == AgentStatus.PUBLISHED)
                 .switchIfEmpty(Mono.error(BusinessException.Type.AGENT_NOT_FOUND.defer()));
     }
 

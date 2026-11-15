@@ -20,4 +20,9 @@ public interface AgentGateway {
     Flux<Agent> findAll();
 
     Mono<Agent> save(Agent agent);
+
+    /** Busca primero por id y, si no existe, por slug. Vacío si no hay ninguno. */
+    default Mono<Agent> findByIdOrSlug(String idOrSlug) {
+        return findById(idOrSlug).switchIfEmpty(Mono.defer(() -> findBySlug(idOrSlug)));
+    }
 }

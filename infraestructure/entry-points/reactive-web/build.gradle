@@ -1,0 +1,22 @@
+// entry-points-reactive-web: adaptador de entrada HTTP (Spring WebFlux).
+// Traduce peticiones REST a llamadas de los casos de uso y errores de negocio a RFC 7807.
+plugins {
+    id 'io.spring.dependency-management' version '1.1.6'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.boot:spring-boot-dependencies:3.3.5"
+    }
+}
+
+dependencies {
+    implementation project(':domain-model')
+    implementation project(':domain-usecase')
+
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    // Pruebas de contrato HTTP con @WebFluxTest + WebTestClient (casos de uso simulados).
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}

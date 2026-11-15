@@ -1,5 +1,6 @@
 package com.trianova.catalog.usecase.plan;
 
+import com.trianova.catalog.domain.agent.AgentStatus;
 import com.trianova.catalog.domain.agent.gateway.AgentGateway;
 import com.trianova.catalog.domain.common.event.EventPublisher;
 import com.trianova.catalog.domain.common.ex.BusinessException;
@@ -9,7 +10,6 @@ import com.trianova.catalog.domain.plan.Price;
 import com.trianova.catalog.domain.plan.event.PriceUpdated;
 import com.trianova.catalog.domain.plan.gateway.PlanGateway;
 import lombok.RequiredArgsConstructor;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
@@ -26,8 +26,17 @@ public class PlanUseCase {
     private final AgentGateway agentGateway;
     private final EventPublisher eventPublisher;
 
-    public Flux<Plan> findPlansByAgent(String agentId) {
-        return planGateway.findPublishedByAgentId(agentId);
+    /**
+     * Catálogo público: acepta id o slug y solo responde si el agente está publicado
+     * (si no, AGENT_NOT_FOUND, igual que el detalle del agente).
+     */
+    public Mono<PublishedPlans> findPublishedPlans(String agentIdOrSlug) {
+        return agentGateway.findByIdOrSlug(agentIdOrSlug)
+                .filter(agent -> agent.getStatus() == AgentStatus.PUBLISHED)
+                .switchIfEmpty(Mono.error(BusinessException.Type.AGENT_NOT_FOUND.defer()))
+                .flatMap(agent -> planGateway.findPublishedByAgentId(agent.getId())
+                        .collectList()
+                        .map(plans -> new PublishedPlans(agent.getId(), plans)));
     }
 
     public Mono<Plan> createPlan(Plan plan) {
@@ -46,6 +55,9 @@ public class PlanUseCase {
                 .flatMap(existing -> planGateway.save(existing.toBuilder()
                         .name(data.getName())
                         .description(data.getDescription())
+                        // Semántica PUT: la lista enviada reemplaza a la anterior. Los precios no se tocan (van por /price).
+                        .clearFeatures()
+                        .features(data.getFeatures())
                         .updatedAt(Instant.now())
                         .build()));
     }

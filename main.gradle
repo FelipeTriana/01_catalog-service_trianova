@@ -25,8 +25,12 @@ subprojects {
     // El proyecto tiene comentarios y strings en español (acentos, ñ). Forzamos
     // UTF-8 en la compilación para no depender del encoding por defecto del SO
     // (en Windows es windows-1252, que rompe los caracteres no ASCII).
+    // -parameters conserva los nombres de los parámetros en el bytecode. Spring 6.1+
+    // lo necesita para resolver @PathVariable/@RequestParam sin nombre explícito
+    // (el plugin de Spring Boot lo agrega solo, pero aquí no lo aplicamos).
     tasks.withType(JavaCompile).configureEach {
         options.encoding = 'UTF-8'
+        options.compilerArgs << '-parameters'
     }
 
     repositories {

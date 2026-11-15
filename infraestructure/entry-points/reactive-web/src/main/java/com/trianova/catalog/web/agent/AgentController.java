@@ -7,6 +7,7 @@ import com.trianova.catalog.web.agent.dto.UpdateAgentRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -68,5 +69,17 @@ public class AgentController {
     @PostMapping("/admin/agents/{id}/archive")
     public Mono<AgentResponse> archiveAgent(@PathVariable String id) {
         return agentUseCase.archiveAgent(id).map(AgentDtoMapper::toResponse);
+    }
+
+    @PostMapping("/admin/agents/{id}/restore")
+    public Mono<AgentResponse> restoreAgent(@PathVariable String id) {
+        return agentUseCase.restoreAgent(id).map(AgentDtoMapper::toResponse);
+    }
+
+    /** Solo DRAFT; borra también sus planes. 204 sin cuerpo. */
+    @DeleteMapping("/admin/agents/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public Mono<Void> deleteAgent(@PathVariable String id) {
+        return agentUseCase.deleteAgent(id);
     }
 }

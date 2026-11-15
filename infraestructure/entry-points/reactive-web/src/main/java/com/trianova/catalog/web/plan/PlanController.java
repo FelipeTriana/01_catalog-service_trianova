@@ -9,6 +9,7 @@ import com.trianova.catalog.web.plan.dto.UpdatePlanRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -67,5 +68,22 @@ public class PlanController {
     @PostMapping("/admin/plans/{id}/publish")
     public Mono<PlanResponse> publishPlan(@PathVariable String id) {
         return planUseCase.publishPlan(id).map(PlanDtoMapper::toResponse);
+    }
+
+    @PostMapping("/admin/plans/{id}/archive")
+    public Mono<PlanResponse> archivePlan(@PathVariable String id) {
+        return planUseCase.archivePlan(id).map(PlanDtoMapper::toResponse);
+    }
+
+    @PostMapping("/admin/plans/{id}/restore")
+    public Mono<PlanResponse> restorePlan(@PathVariable String id) {
+        return planUseCase.restorePlan(id).map(PlanDtoMapper::toResponse);
+    }
+
+    /** Solo DRAFT; precios y features se borran con el plan. 204 sin cuerpo. */
+    @DeleteMapping("/admin/plans/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public Mono<Void> deletePlan(@PathVariable String id) {
+        return planUseCase.deletePlan(id);
     }
 }

@@ -1,7 +1,7 @@
 package com.trianova.catalog.domain.agent.gateway;
 
 import com.trianova.catalog.domain.agent.Agent;
-import com.trianova.catalog.domain.agent.AgentStatus;
+import com.trianova.catalog.domain.common.PublicationStatus;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -15,11 +15,13 @@ public interface AgentGateway {
 
     Mono<Agent> findBySlug(String slug);
 
-    Flux<Agent> findByStatus(AgentStatus status);
+    Flux<Agent> findByStatus(PublicationStatus status);
 
     Flux<Agent> findAll();
 
     Mono<Agent> save(Agent agent);
+
+    Mono<Void> deleteById(String id);
 
     /** Busca primero por id y, si no existe, por slug. Vacío si no hay ninguno. */
     default Mono<Agent> findByIdOrSlug(String idOrSlug) {

@@ -1,7 +1,7 @@
 package com.trianova.catalog.r2dbc.agent;
 
 import com.trianova.catalog.domain.agent.Agent;
-import com.trianova.catalog.domain.agent.AgentStatus;
+import com.trianova.catalog.domain.common.PublicationStatus;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -58,7 +58,7 @@ class AgentRepositoryAdapterIT {
     private Agent draft(String id, String slug) {
         return Agent.builder()
                 .id(id).slug(slug).name("Asistente")
-                .status(AgentStatus.DRAFT).createdAt(Instant.now())
+                .status(PublicationStatus.DRAFT).createdAt(Instant.now())
                 .build();
     }
 
@@ -67,7 +67,7 @@ class AgentRepositoryAdapterIT {
         AgentRepositoryAdapter adapter = adapter();
 
         StepVerifier.create(adapter.save(draft("a1", "slug-1")).then(adapter.findById("a1")))
-                .expectNextMatches(a -> a.getId().equals("a1") && a.getStatus() == AgentStatus.DRAFT)
+                .expectNextMatches(a -> a.getId().equals("a1") && a.getStatus() == PublicationStatus.DRAFT)
                 .verifyComplete();
     }
 
@@ -77,7 +77,7 @@ class AgentRepositoryAdapterIT {
 
         Agent saved = adapter.save(draft("a2", "slug-2")).block();
         StepVerifier.create(adapter.save(saved.publish()).then(adapter.findById("a2")))
-                .expectNextMatches(a -> a.getStatus() == AgentStatus.PUBLISHED)
+                .expectNextMatches(a -> a.getStatus() == PublicationStatus.PUBLISHED)
                 .verifyComplete();
     }
 
@@ -95,10 +95,21 @@ class AgentRepositoryAdapterIT {
         AgentRepositoryAdapter adapter = adapter();
 
         StepVerifier.create(adapter.save(draft("a4", "slug-4").publish())
-                        .thenMany(adapter.findByStatus(AgentStatus.PUBLISHED))
+                        .thenMany(adapter.findByStatus(PublicationStatus.PUBLISHED))
                         .filter(a -> a.getId().equals("a4"))
                         .next())
-                .expectNextMatches(a -> a.getStatus() == AgentStatus.PUBLISHED)
+                .expectNextMatches(a -> a.getStatus() == PublicationStatus.PUBLISHED)
+                .verifyComplete();
+    }
+
+    @Test
+    void deleteByIdRemovesTheRowAndFreesTheSlug() {
+        AgentRepositoryAdapter adapter = adapter();
+        adapter.save(draft("a9", "slug-9")).block();
+
+        StepVerifier.create(adapter.deleteById("a9").then(adapter.findById("a9"))).verifyComplete();
+        StepVerifier.create(adapter.save(draft("a10", "slug-9")).map(Agent::getSlug))
+                .expectNext("slug-9")
                 .verifyComplete();
     }
 }

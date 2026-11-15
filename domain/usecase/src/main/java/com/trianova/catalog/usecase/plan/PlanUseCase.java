@@ -1,11 +1,11 @@
 package com.trianova.catalog.usecase.plan;
 
-import com.trianova.catalog.domain.agent.AgentStatus;
+import com.trianova.catalog.domain.agent.Agent;
 import com.trianova.catalog.domain.agent.gateway.AgentGateway;
+import com.trianova.catalog.domain.common.PublicationStatus;
 import com.trianova.catalog.domain.common.event.EventPublisher;
 import com.trianova.catalog.domain.common.ex.BusinessException;
 import com.trianova.catalog.domain.plan.Plan;
-import com.trianova.catalog.domain.plan.PlanStatus;
 import com.trianova.catalog.domain.plan.Price;
 import com.trianova.catalog.domain.plan.event.PriceUpdated;
 import com.trianova.catalog.domain.plan.gateway.PlanGateway;
@@ -32,7 +32,7 @@ public class PlanUseCase {
      */
     public Mono<PublishedPlans> findPublishedPlans(String agentIdOrSlug) {
         return agentGateway.findByIdOrSlug(agentIdOrSlug)
-                .filter(agent -> agent.getStatus() == AgentStatus.PUBLISHED)
+                .filter(Agent::isPublished)
                 .switchIfEmpty(Mono.error(BusinessException.Type.AGENT_NOT_FOUND.defer()))
                 .flatMap(agent -> planGateway.findPublishedByAgentId(agent.getId())
                         .collectList()
@@ -44,14 +44,13 @@ public class PlanUseCase {
                 .switchIfEmpty(Mono.error(BusinessException.Type.AGENT_NOT_FOUND.defer()))
                 .flatMap(agent -> planGateway.save(plan.toBuilder()
                         .id(UUID.randomUUID().toString())
-                        .status(PlanStatus.DRAFT)
+                        .status(PublicationStatus.DRAFT)
                         .createdAt(Instant.now())
                         .build()));
     }
 
     public Mono<Plan> updatePlan(String id, Plan data) {
-        return planGateway.findById(id)
-                .switchIfEmpty(Mono.error(BusinessException.Type.PLAN_NOT_FOUND.defer()))
+        return findExisting(id)
                 .flatMap(existing -> planGateway.save(existing.toBuilder()
                         .name(data.getName())
                         .description(data.getDescription())
@@ -64,8 +63,7 @@ public class PlanUseCase {
 
     /** Cambia el precio del ciclo indicado, persiste y emite catalog.price.updated. */
     public Mono<Plan> changePrice(String planId, Price newPrice) {
-        return planGateway.findById(planId)
-                .switchIfEmpty(Mono.error(BusinessException.Type.PLAN_NOT_FOUND.defer()))
+        return findExisting(planId)
                 .map(plan -> plan.changePrice(newPrice))
                 .flatMap(planGateway::save)
                 .flatMap(saved -> eventPublisher.publish(new PriceUpdated(
@@ -79,9 +77,59 @@ public class PlanUseCase {
     }
 
     public Mono<Plan> publishPlan(String id) {
-        return planGateway.findById(id)
-                .switchIfEmpty(Mono.error(BusinessException.Type.PLAN_NOT_FOUND.defer()))
+        return findExisting(id)
                 .map(Plan::publish)
                 .flatMap(planGateway::save);
+    }
+
+    /**
+     * PUBLISHED -> ARCHIVED. Si el agente está publicado, el plan no puede ser su
+     * último plan publicado: el agente quedaría en el catálogo sin nada que vender.
+     * Primero se valida la transición del plan y después la invariante.
+     */
+    public Mono<Plan> archivePlan(String id) {
+        return findExisting(id)
+                .flatMap(plan -> {
+                    Plan archived = plan.archive();
+                    return agentKeepsAPublishedPlanWithout(plan)
+                            .flatMap(keeps -> Boolean.TRUE.equals(keeps)
+                                    ? planGateway.save(archived)
+                                    : Mono.<Plan>error(BusinessException.Type.AGENT_HAS_NO_PUBLISHED_PLAN.defer()));
+                });
+    }
+
+    /** ARCHIVED -> PUBLISHED. Suma un plan publicado, así que no puede romper la invariante. */
+    public Mono<Plan> restorePlan(String id) {
+        return findExisting(id)
+                .map(Plan::restore)
+                .flatMap(planGateway::save);
+    }
+
+    /**
+     * Solo un DRAFT se elimina. Un plan en DRAFT no cuenta para la invariante del
+     * agente, así que borrarlo nunca la rompe. Precios y features caen en cascada.
+     */
+    public Mono<Void> deletePlan(String id) {
+        return findExisting(id)
+                .filter(Plan::isDeletable)
+                .switchIfEmpty(Mono.error(BusinessException.Type.CANNOT_DELETE_NON_DRAFT.defer()))
+                .flatMap(plan -> planGateway.deleteById(id));
+    }
+
+    /**
+     * true si archivar el plan deja la invariante intacta: el agente no está
+     * publicado (o no existe), o tiene otro plan publicado además de este.
+     */
+    private Mono<Boolean> agentKeepsAPublishedPlanWithout(Plan plan) {
+        return agentGateway.findById(plan.getAgentId())
+                .filter(Agent::isPublished)
+                .flatMap(agent -> planGateway.findPublishedByAgentId(agent.getId())
+                        .any(other -> !other.getId().equals(plan.getId())))
+                .defaultIfEmpty(true);
+    }
+
+    private Mono<Plan> findExisting(String id) {
+        return planGateway.findById(id)
+                .switchIfEmpty(Mono.error(BusinessException.Type.PLAN_NOT_FOUND.defer()));
     }
 }

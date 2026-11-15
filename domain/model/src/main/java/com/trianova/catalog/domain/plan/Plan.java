@@ -1,5 +1,6 @@
 package com.trianova.catalog.domain.plan;
 
+import com.trianova.catalog.domain.common.PublicationStatus;
 import com.trianova.catalog.domain.common.ex.BusinessException;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -24,7 +25,7 @@ public class Plan {
     private final String agentId;
     private final String name;
     private final String description;
-    private final PlanStatus status;
+    private final PublicationStatus status;
 
     @Singular
     private final List<Price> prices;
@@ -37,24 +38,36 @@ public class Plan {
 
     /** DRAFT -> PUBLISHED. No se publica sin al menos un precio válido. */
     public Plan publish() {
-        if (status != PlanStatus.DRAFT) {
+        if (status != PublicationStatus.DRAFT) {
             throw new BusinessException(BusinessException.Type.INVALID_STATE_TRANSITION);
         }
         if (prices == null || prices.isEmpty()) {
             throw new BusinessException(BusinessException.Type.PLAN_HAS_NO_VALID_PRICE);
         }
-        return toBuilder()
-                .status(PlanStatus.PUBLISHED)
-                .updatedAt(Instant.now())
-                .build();
+        return transitionTo(PublicationStatus.PUBLISHED, PublicationStatus.DRAFT);
     }
 
+    /** PUBLISHED -> ARCHIVED. Retira el plan del catálogo sin borrarlo. */
     public Plan archive() {
-        if (status == PlanStatus.ARCHIVED) {
+        return transitionTo(PublicationStatus.ARCHIVED, PublicationStatus.PUBLISHED);
+    }
+
+    /** ARCHIVED -> PUBLISHED. Ya tuvo precio al publicarse y los precios no se pueden quitar. */
+    public Plan restore() {
+        return transitionTo(PublicationStatus.PUBLISHED, PublicationStatus.ARCHIVED);
+    }
+
+    public boolean isDeletable() {
+        return status.isDeletable();
+    }
+
+    /** Mismo criterio que Agent: estado de origen esperado + tabla de PublicationStatus. */
+    private Plan transitionTo(PublicationStatus target, PublicationStatus expectedSource) {
+        if (status != expectedSource || !status.canTransitionTo(target)) {
             throw new BusinessException(BusinessException.Type.INVALID_STATE_TRANSITION);
         }
         return toBuilder()
-                .status(PlanStatus.ARCHIVED)
+                .status(target)
                 .updatedAt(Instant.now())
                 .build();
     }
@@ -79,6 +92,6 @@ public class Plan {
     }
 
     public boolean isPublished() {
-        return status == PlanStatus.PUBLISHED;
+        return status == PublicationStatus.PUBLISHED;
     }
 }

@@ -1,5 +1,6 @@
 package com.trianova.catalog.domain.agent;
 
+import com.trianova.catalog.domain.common.PublicationStatus;
 import com.trianova.catalog.domain.common.ex.BusinessException;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -22,33 +23,44 @@ public class Agent {
     private final String name;
     private final String description;
     private final String category;
-    private final AgentStatus status;
+    private final PublicationStatus status;
     private final Instant createdAt;
     private final Instant updatedAt;
 
     /** DRAFT -> PUBLISHED. */
     public Agent publish() {
-        if (status != AgentStatus.DRAFT) {
-            throw new BusinessException(BusinessException.Type.INVALID_STATE_TRANSITION);
-        }
-        return toBuilder()
-                .status(AgentStatus.PUBLISHED)
-                .updatedAt(Instant.now())
-                .build();
+        return transitionTo(PublicationStatus.PUBLISHED, PublicationStatus.DRAFT);
     }
 
-    /** Cualquier estado -> ARCHIVED, salvo que ya esté archivado. */
+    /** PUBLISHED -> ARCHIVED. Un borrador no se archiva: se elimina. */
     public Agent archive() {
-        if (status == AgentStatus.ARCHIVED) {
-            throw new BusinessException(BusinessException.Type.INVALID_STATE_TRANSITION);
-        }
-        return toBuilder()
-                .status(AgentStatus.ARCHIVED)
-                .updatedAt(Instant.now())
-                .build();
+        return transitionTo(PublicationStatus.ARCHIVED, PublicationStatus.PUBLISHED);
+    }
+
+    /** ARCHIVED -> PUBLISHED. Recupera el agente y conserva su slug. */
+    public Agent restore() {
+        return transitionTo(PublicationStatus.PUBLISHED, PublicationStatus.ARCHIVED);
     }
 
     public boolean isPublished() {
-        return status == AgentStatus.PUBLISHED;
+        return status == PublicationStatus.PUBLISHED;
+    }
+
+    public boolean isDeletable() {
+        return status.isDeletable();
+    }
+
+    /**
+     * Valida el estado de origen esperado (publish y restore llegan ambos a
+     * PUBLISHED, pero desde estados distintos) y la tabla de PublicationStatus.
+     */
+    private Agent transitionTo(PublicationStatus target, PublicationStatus expectedSource) {
+        if (status != expectedSource || !status.canTransitionTo(target)) {
+            throw new BusinessException(BusinessException.Type.INVALID_STATE_TRANSITION);
+        }
+        return toBuilder()
+                .status(target)
+                .updatedAt(Instant.now())
+                .build();
     }
 }

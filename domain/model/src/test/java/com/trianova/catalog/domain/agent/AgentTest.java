@@ -1,11 +1,14 @@
 package com.trianova.catalog.domain.agent;
 
+import com.trianova.catalog.domain.common.PublicationStatus;
 import com.trianova.catalog.domain.common.ex.BusinessException;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -16,7 +19,7 @@ class AgentTest {
                 .id("a1")
                 .slug("asistente-ventas")
                 .name("Asistente de Ventas")
-                .status(AgentStatus.DRAFT)
+                .status(PublicationStatus.DRAFT)
                 .createdAt(Instant.now())
                 .build();
     }
@@ -25,7 +28,7 @@ class AgentTest {
     void publishMovesDraftToPublished() {
         Agent published = draftAgent().publish();
 
-        assertEquals(AgentStatus.PUBLISHED, published.getStatus());
+        assertEquals(PublicationStatus.PUBLISHED, published.getStatus());
         assertTrue(published.isPublished());
     }
 
@@ -38,18 +41,44 @@ class AgentTest {
     }
 
     @Test
-    void archiveMovesToArchived() {
-        Agent archived = draftAgent().archive();
+    void archiveMovesPublishedToArchived() {
+        Agent archived = draftAgent().publish().archive();
 
-        assertEquals(AgentStatus.ARCHIVED, archived.getStatus());
+        assertEquals(PublicationStatus.ARCHIVED, archived.getStatus());
+        assertNotNull(archived.getUpdatedAt());
+    }
+
+    @Test
+    void archiveFailsFromDraftBecauseItSkipsPublished() {
+        BusinessException ex = assertThrows(BusinessException.class, draftAgent()::archive);
+        assertEquals(BusinessException.Type.INVALID_STATE_TRANSITION, ex.getType());
     }
 
     @Test
     void archiveFailsWhenAlreadyArchived() {
-        Agent archived = draftAgent().archive();
+        Agent archived = draftAgent().publish().archive();
 
         BusinessException ex = assertThrows(BusinessException.class, archived::archive);
         assertEquals(BusinessException.Type.INVALID_STATE_TRANSITION, ex.getType());
+    }
+
+    @Test
+    void restoreMovesArchivedBackToPublished() {
+        Agent restored = draftAgent().publish().archive().restore();
+
+        assertEquals(PublicationStatus.PUBLISHED, restored.getStatus());
+    }
+
+    @Test
+    void restoreFailsWhenNotArchived() {
+        BusinessException ex = assertThrows(BusinessException.class, draftAgent()::restore);
+        assertEquals(BusinessException.Type.INVALID_STATE_TRANSITION, ex.getType());
+    }
+
+    @Test
+    void onlyDraftIsDeletable() {
+        assertTrue(draftAgent().isDeletable());
+        assertFalse(draftAgent().publish().isDeletable());
     }
 
     @Test
@@ -58,6 +87,6 @@ class AgentTest {
 
         draft.publish();
 
-        assertEquals(AgentStatus.DRAFT, draft.getStatus());
+        assertEquals(PublicationStatus.DRAFT, draft.getStatus());
     }
 }

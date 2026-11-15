@@ -1,7 +1,7 @@
 package com.trianova.catalog.r2dbc.agent;
 
 import com.trianova.catalog.domain.agent.Agent;
-import com.trianova.catalog.domain.agent.AgentStatus;
+import com.trianova.catalog.domain.common.PublicationStatus;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -16,7 +16,7 @@ class AgentMapperTest {
     void roundTripPreservesFieldsAndMapsStatusAsText() {
         Agent agent = Agent.builder()
                 .id("a1").slug("asistente-ventas").name("Asistente de Ventas")
-                .description("desc").category("SALES").status(AgentStatus.PUBLISHED)
+                .description("desc").category("SALES").status(PublicationStatus.PUBLISHED)
                 .createdAt(Instant.parse("2026-01-01T00:00:00Z"))
                 .build();
 
@@ -26,7 +26,7 @@ class AgentMapperTest {
         Agent back = AgentRepositoryAdapter.domainFrom(data);
         assertEquals(agent.getId(), back.getId());
         assertEquals(agent.getSlug(), back.getSlug());
-        assertEquals(AgentStatus.PUBLISHED, back.getStatus());
+        assertEquals(PublicationStatus.PUBLISHED, back.getStatus());
         assertEquals(agent.getCreatedAt(), back.getCreatedAt());
     }
 

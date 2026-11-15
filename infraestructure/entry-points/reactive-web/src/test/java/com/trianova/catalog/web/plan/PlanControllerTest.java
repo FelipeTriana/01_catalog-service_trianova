@@ -1,11 +1,11 @@
 package com.trianova.catalog.web.plan;
 
 import com.trianova.catalog.domain.common.Money;
+import com.trianova.catalog.domain.common.PublicationStatus;
 import com.trianova.catalog.domain.common.ex.BusinessException;
 import com.trianova.catalog.domain.plan.BillingCycle;
 import com.trianova.catalog.domain.plan.Feature;
 import com.trianova.catalog.domain.plan.Plan;
-import com.trianova.catalog.domain.plan.PlanStatus;
 import com.trianova.catalog.domain.plan.Price;
 import com.trianova.catalog.usecase.plan.PlanUseCase;
 import com.trianova.catalog.usecase.plan.PublishedPlans;
@@ -41,7 +41,7 @@ class PlanControllerTest {
     PlanUseCase planUseCase;
 
     /** Montos con 4 decimales, como llegan desde NUMERIC(19,4). */
-    private static Plan proPlan(PlanStatus status) {
+    private static Plan proPlan(PublicationStatus status) {
         return Plan.builder()
                 .id("p1").agentId("a1").name("Pro").status(status)
                 .price(new Price(Money.of(new BigDecimal("59900.0000"), "COP"), BillingCycle.MONTHLY))
@@ -54,7 +54,7 @@ class PlanControllerTest {
     @Test
     void listsPublishedPlansBySlugWithResolvedAgentId() {
         when(planUseCase.findPublishedPlans("asistente-ventas"))
-                .thenReturn(Mono.just(new PublishedPlans("a1", List.of(proPlan(PlanStatus.PUBLISHED)))));
+                .thenReturn(Mono.just(new PublishedPlans("a1", List.of(proPlan(PublicationStatus.PUBLISHED)))));
 
         client.get().uri("/api/v1/agents/asistente-ventas/plans").exchange()
                 .expectStatus().isOk()
@@ -93,7 +93,7 @@ class PlanControllerTest {
 
     @Test
     void createPlanTakesAgentIdFromPathAndMapsPricesAndFeatures() {
-        when(planUseCase.createPlan(any())).thenReturn(Mono.just(proPlan(PlanStatus.DRAFT)));
+        when(planUseCase.createPlan(any())).thenReturn(Mono.just(proPlan(PublicationStatus.DRAFT)));
 
         client.post().uri("/api/v1/admin/agents/a1/plans")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -119,7 +119,7 @@ class PlanControllerTest {
 
     @Test
     void createPlanWithoutPricesIsAllowedForDraft() {
-        when(planUseCase.createPlan(any())).thenReturn(Mono.just(proPlan(PlanStatus.DRAFT)));
+        when(planUseCase.createPlan(any())).thenReturn(Mono.just(proPlan(PublicationStatus.DRAFT)));
 
         client.post().uri("/api/v1/admin/agents/a1/plans")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -158,7 +158,7 @@ class PlanControllerTest {
 
     @Test
     void updatePlanPassesPathIdAndBody() {
-        when(planUseCase.updatePlan(eq("p1"), any())).thenReturn(Mono.just(proPlan(PlanStatus.DRAFT)));
+        when(planUseCase.updatePlan(eq("p1"), any())).thenReturn(Mono.just(proPlan(PublicationStatus.DRAFT)));
 
         client.put().uri("/api/v1/admin/plans/p1")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -191,7 +191,7 @@ class PlanControllerTest {
 
     @Test
     void changePriceAcceptsNumericAmountAndCallsUseCase() {
-        when(planUseCase.changePrice(eq("p1"), any())).thenReturn(Mono.just(proPlan(PlanStatus.PUBLISHED)));
+        when(planUseCase.changePrice(eq("p1"), any())).thenReturn(Mono.just(proPlan(PublicationStatus.PUBLISHED)));
 
         client.put().uri("/api/v1/admin/plans/p1/price")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -271,5 +271,54 @@ class PlanControllerTest {
         client.post().uri("/api/v1/admin/plans/ghost/publish").exchange()
                 .expectStatus().isNotFound()
                 .expectBody().jsonPath("$.code").isEqualTo("PLAN_NOT_FOUND");
+    }
+
+    @Test
+    void archivePlanReturnsArchived() {
+        when(planUseCase.archivePlan("p1")).thenReturn(Mono.just(proPlan(PublicationStatus.ARCHIVED)));
+
+        client.post().uri("/api/v1/admin/plans/p1/archive").exchange()
+                .expectStatus().isOk()
+                .expectBody().jsonPath("$.status").isEqualTo("ARCHIVED");
+    }
+
+    @Test
+    void archiveLastPublishedPlanReturns409() {
+        when(planUseCase.archivePlan("p1"))
+                .thenReturn(Mono.error(BusinessException.Type.AGENT_HAS_NO_PUBLISHED_PLAN.build()));
+
+        client.post().uri("/api/v1/admin/plans/p1/archive").exchange()
+                .expectStatus().isEqualTo(409)
+                .expectBody().jsonPath("$.code").isEqualTo("AGENT_HAS_NO_PUBLISHED_PLAN");
+    }
+
+    @Test
+    void restorePlanReturnsPublished() {
+        when(planUseCase.restorePlan("p1")).thenReturn(Mono.just(proPlan(PublicationStatus.PUBLISHED)));
+
+        client.post().uri("/api/v1/admin/plans/p1/restore").exchange()
+                .expectStatus().isOk()
+                .expectBody().jsonPath("$.status").isEqualTo("PUBLISHED");
+    }
+
+    @Test
+    void deleteDraftPlanReturns204WithoutBody() {
+        when(planUseCase.deletePlan("p1")).thenReturn(Mono.empty());
+
+        client.delete().uri("/api/v1/admin/plans/p1").exchange()
+                .expectStatus().isNoContent()
+                .expectBody().isEmpty();
+
+        verify(planUseCase).deletePlan("p1");
+    }
+
+    @Test
+    void deleteNonDraftPlanReturns409() {
+        when(planUseCase.deletePlan("p1"))
+                .thenReturn(Mono.error(BusinessException.Type.CANNOT_DELETE_NON_DRAFT.build()));
+
+        client.delete().uri("/api/v1/admin/plans/p1").exchange()
+                .expectStatus().isEqualTo(409)
+                .expectBody().jsonPath("$.code").isEqualTo("CANNOT_DELETE_NON_DRAFT");
     }
 }

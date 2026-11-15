@@ -16,8 +16,9 @@ public class BusinessException extends ApplicationException {
         SLUG_ALREADY_EXISTS("An agent with that slug already exists"),
         INVALID_PRICE("The price amount must be positive and use a supported currency"),
         PLAN_HAS_NO_VALID_PRICE("A plan cannot be published without at least one valid price"),
-        AGENT_HAS_NO_PUBLISHED_PLAN("An agent cannot be published without at least one published plan"),
-        INVALID_STATE_TRANSITION("The requested state transition is not allowed");
+        AGENT_HAS_NO_PUBLISHED_PLAN("A published agent requires at least one published plan"),
+        INVALID_STATE_TRANSITION("The requested state transition is not allowed"),
+        CANNOT_DELETE_NON_DRAFT("Only drafts can be deleted; archive it instead");
 
         private final String message;
 

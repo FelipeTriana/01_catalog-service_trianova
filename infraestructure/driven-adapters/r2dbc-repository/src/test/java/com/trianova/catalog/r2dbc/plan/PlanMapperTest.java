@@ -1,10 +1,10 @@
 package com.trianova.catalog.r2dbc.plan;
 
 import com.trianova.catalog.domain.common.Money;
+import com.trianova.catalog.domain.common.PublicationStatus;
 import com.trianova.catalog.domain.plan.BillingCycle;
 import com.trianova.catalog.domain.plan.Feature;
 import com.trianova.catalog.domain.plan.Plan;
-import com.trianova.catalog.domain.plan.PlanStatus;
 import com.trianova.catalog.domain.plan.Price;
 import org.junit.jupiter.api.Test;
 
@@ -23,7 +23,7 @@ class PlanMapperTest {
     void rootMapsStatusAsTextAndReassembles() {
         Plan plan = Plan.builder()
                 .id("p1").agentId("ag1").name("Pro").description("desc")
-                .status(PlanStatus.PUBLISHED)
+                .status(PublicationStatus.PUBLISHED)
                 .createdAt(Instant.parse("2026-01-01T00:00:00Z"))
                 .build();
 
@@ -33,7 +33,7 @@ class PlanMapperTest {
 
         Plan back = PlanRepositoryAdapter.domainFrom(data, List.of(), List.of());
         assertEquals("p1", back.getId());
-        assertEquals(PlanStatus.PUBLISHED, back.getStatus());
+        assertEquals(PublicationStatus.PUBLISHED, back.getStatus());
         assertTrue(back.getPrices().isEmpty());
         assertTrue(back.getFeatures().isEmpty());
     }

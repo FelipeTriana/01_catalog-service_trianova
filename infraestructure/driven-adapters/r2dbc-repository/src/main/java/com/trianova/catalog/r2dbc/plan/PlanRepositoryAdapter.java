@@ -1,10 +1,10 @@
 package com.trianova.catalog.r2dbc.plan;
 
 import com.trianova.catalog.domain.common.Money;
+import com.trianova.catalog.domain.common.PublicationStatus;
 import com.trianova.catalog.domain.plan.BillingCycle;
 import com.trianova.catalog.domain.plan.Feature;
 import com.trianova.catalog.domain.plan.Plan;
-import com.trianova.catalog.domain.plan.PlanStatus;
 import com.trianova.catalog.domain.plan.Price;
 import com.trianova.catalog.domain.plan.gateway.PlanGateway;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
@@ -58,8 +58,19 @@ public class PlanRepositoryAdapter implements PlanGateway {
 
     @Override
     public Flux<Plan> findPublishedByAgentId(String agentId) {
-        return planRepository.findByAgentIdAndStatus(agentId, PlanStatus.PUBLISHED.name())
+        return planRepository.findByAgentIdAndStatus(agentId, PublicationStatus.PUBLISHED.name())
                 .flatMap(this::reassemble);
+    }
+
+    /** Precios y features caen por ON DELETE CASCADE (V2), sin borrarlos a mano. */
+    @Override
+    public Mono<Void> deleteById(String id) {
+        return planRepository.deleteById(id);
+    }
+
+    @Override
+    public Mono<Void> deleteByAgentId(String agentId) {
+        return planRepository.deleteByAgentId(agentId);
     }
 
     @Override
@@ -131,7 +142,7 @@ public class PlanRepositoryAdapter implements PlanGateway {
                 .agentId(d.getAgentId())
                 .name(d.getName())
                 .description(d.getDescription())
-                .status(d.getStatus() != null ? PlanStatus.valueOf(d.getStatus()) : null)
+                .status(d.getStatus() != null ? PublicationStatus.valueOf(d.getStatus()) : null)
                 .prices(prices)
                 .features(features)
                 .createdAt(d.getCreatedAt())

@@ -1,8 +1,8 @@
 package com.trianova.catalog.r2dbc.agent;
 
 import com.trianova.catalog.domain.agent.Agent;
-import com.trianova.catalog.domain.agent.AgentStatus;
 import com.trianova.catalog.domain.agent.gateway.AgentGateway;
+import com.trianova.catalog.domain.common.PublicationStatus;
 import com.trianova.catalog.r2dbc.commons.AdapterOperations;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.stereotype.Repository;
@@ -36,7 +36,7 @@ public class AgentRepositoryAdapter
     }
 
     @Override
-    public Flux<Agent> findByStatus(AgentStatus status) {
+    public Flux<Agent> findByStatus(PublicationStatus status) {
         return mapMany(repository.findByStatus(status.name()));
     }
 
@@ -70,7 +70,7 @@ public class AgentRepositoryAdapter
                 .name(d.getName())
                 .description(d.getDescription())
                 .category(d.getCategory())
-                .status(d.getStatus() != null ? AgentStatus.valueOf(d.getStatus()) : null)
+                .status(d.getStatus() != null ? PublicationStatus.valueOf(d.getStatus()) : null)
                 .createdAt(d.getCreatedAt())
                 .updatedAt(d.getUpdatedAt())
                 .build();

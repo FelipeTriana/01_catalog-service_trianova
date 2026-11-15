@@ -1,10 +1,10 @@
 package com.trianova.catalog.r2dbc.plan;
 
 import com.trianova.catalog.domain.common.Money;
+import com.trianova.catalog.domain.common.PublicationStatus;
 import com.trianova.catalog.domain.plan.BillingCycle;
 import com.trianova.catalog.domain.plan.Feature;
 import com.trianova.catalog.domain.plan.Plan;
-import com.trianova.catalog.domain.plan.PlanStatus;
 import com.trianova.catalog.domain.plan.Price;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
@@ -74,7 +74,7 @@ class PlanRepositoryAdapterIT {
         return new Price(Money.of(new BigDecimal(amount), currency), cycle);
     }
 
-    private Plan plan(String id, String agentId, PlanStatus status, List<Price> prices) {
+    private Plan plan(String id, String agentId, PublicationStatus status, List<Price> prices) {
         return Plan.builder()
                 .id(id).agentId(agentId).name("Plan " + id)
                 .status(status)
@@ -87,14 +87,14 @@ class PlanRepositoryAdapterIT {
     @Test
     void savesPlanWithPricesAndFeaturesThenReassembles() {
         PlanRepositoryAdapter adapter = adapter();
-        Plan p = plan("p1", "agent-1", PlanStatus.DRAFT, List.of(
+        Plan p = plan("p1", "agent-1", PublicationStatus.DRAFT, List.of(
                 price("29.00", "USD", BillingCycle.MONTHLY),
                 price("290.00", "USD", BillingCycle.YEARLY)));
 
         StepVerifier.create(adapter.save(p).then(adapter.findById("p1")))
                 .expectNextMatches(r -> r.getPrices().size() == 2
                         && r.getFeatures().size() == 1
-                        && r.getStatus() == PlanStatus.DRAFT
+                        && r.getStatus() == PublicationStatus.DRAFT
                         && r.getPrices().stream().anyMatch(pr ->
                         pr.billingCycle() == BillingCycle.MONTHLY
                                 && pr.amount().amount().compareTo(new BigDecimal("29.00")) == 0))
@@ -104,7 +104,7 @@ class PlanRepositoryAdapterIT {
     @Test
     void updateReplacesChildRowsWithoutLeavingOrphans() {
         PlanRepositoryAdapter adapter = adapter();
-        Plan draft = plan("p2", "agent-2", PlanStatus.DRAFT,
+        Plan draft = plan("p2", "agent-2", PublicationStatus.DRAFT,
                 List.of(price("29.00", "USD", BillingCycle.MONTHLY)));
 
         Plan saved = adapter.save(draft).block();
@@ -125,9 +125,9 @@ class PlanRepositoryAdapterIT {
     @Test
     void findByAgentIdReturnsAllPlansOfAgent() {
         PlanRepositoryAdapter adapter = adapter();
-        adapter.save(plan("p3a", "agent-3", PlanStatus.DRAFT,
+        adapter.save(plan("p3a", "agent-3", PublicationStatus.DRAFT,
                 List.of(price("10.00", "USD", BillingCycle.MONTHLY)))).block();
-        adapter.save(plan("p3b", "agent-3", PlanStatus.PUBLISHED,
+        adapter.save(plan("p3b", "agent-3", PublicationStatus.PUBLISHED,
                 List.of(price("20.00", "USD", BillingCycle.MONTHLY)))).block();
 
         StepVerifier.create(adapter.findByAgentId("agent-3").collectList())
@@ -138,14 +138,44 @@ class PlanRepositoryAdapterIT {
     @Test
     void findPublishedByAgentIdReturnsOnlyPublished() {
         PlanRepositoryAdapter adapter = adapter();
-        adapter.save(plan("p4pub", "agent-4", PlanStatus.PUBLISHED,
+        adapter.save(plan("p4pub", "agent-4", PublicationStatus.PUBLISHED,
                 List.of(price("49.00", "USD", BillingCycle.MONTHLY)))).block();
-        adapter.save(plan("p4drf", "agent-4", PlanStatus.DRAFT,
+        adapter.save(plan("p4drf", "agent-4", PublicationStatus.DRAFT,
                 List.of(price("9.00", "USD", BillingCycle.MONTHLY)))).block();
 
         StepVerifier.create(adapter.findPublishedByAgentId("agent-4").collectList())
                 .expectNextMatches(list -> list.size() == 1
                         && list.get(0).getId().equals("p4pub"))
                 .verifyComplete();
+    }
+
+    @Test
+    void deleteByIdRemovesPlanAndCascadesPricesAndFeatures() {
+        PlanRepositoryAdapter adapter = adapter();
+        adapter.save(plan("p5", "agent-5", PublicationStatus.DRAFT,
+                List.of(price("10.00", "USD", BillingCycle.MONTHLY)))).block();
+
+        StepVerifier.create(adapter.deleteById("p5").then(adapter.findById("p5")))
+                .verifyComplete();
+        // ON DELETE CASCADE: no quedan filas hijas huérfanas.
+        StepVerifier.create(priceRepository.findByPlanId("p5").count()).expectNext(0L).verifyComplete();
+        StepVerifier.create(featureRepository.findByPlanId("p5").count()).expectNext(0L).verifyComplete();
+    }
+
+    @Test
+    void deleteByAgentIdRemovesOnlyThatAgentsPlansInAnyState() {
+        PlanRepositoryAdapter adapter = adapter();
+        adapter.save(plan("p6a", "agent-6", PublicationStatus.DRAFT,
+                List.of(price("10.00", "USD", BillingCycle.MONTHLY)))).block();
+        adapter.save(plan("p6b", "agent-6", PublicationStatus.PUBLISHED,
+                List.of(price("20.00", "USD", BillingCycle.MONTHLY)))).block();
+        adapter.save(plan("p7", "agent-7", PublicationStatus.DRAFT,
+                List.of(price("30.00", "USD", BillingCycle.MONTHLY)))).block();
+
+        StepVerifier.create(adapter.deleteByAgentId("agent-6").thenMany(adapter.findByAgentId("agent-6")).count())
+                .expectNext(0L)
+                .verifyComplete();
+        StepVerifier.create(priceRepository.findByPlanId("p6b").count()).expectNext(0L).verifyComplete();
+        StepVerifier.create(adapter.findById("p7")).expectNextCount(1).verifyComplete();
     }
 }

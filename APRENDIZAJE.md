@@ -594,3 +594,41 @@ el paquete raíz. Diferencia: los repositorios R2DBC se descubren por
 autoconfiguración, pero los controllers se descubren por **component scan**. Por eso
 el ancla web usa `@SpringBootApplication` (incluye `@ComponentScan`) y no solo
 `@SpringBootConfiguration`.
+
+---
+
+## 23. Ciclo de vida como tabla de transiciones e invariante explícita
+
+**Problema:** Agent y Plan tenían el mismo ciclo de vida, pero cada uno lo
+implementaba con `if` sueltos, y de forma distinta e incompleta: `archive()`
+dejaba saltar de DRAFT a ARCHIVED, y un plan no se podía archivar.
+
+**Solución:** un solo enum, `PublicationStatus`, que contiene la tabla de
+transiciones (`canTransitionTo`) en un switch exhaustivo:
+
+```
+DRAFT --publish--> PUBLISHED --archive--> ARCHIVED
+                       ^                      |
+                       +-------restore--------+
+```
+
+- Solo un DRAFT se elimina (`isDeletable`), porque ningún cliente lo vio.
+- No existe PUBLISHED -> DRAFT: para retirar algo publicado, se archiva.
+
+**La invariante que guía todo:** *un agente PUBLISHED siempre tiene al menos un
+plan PUBLISHED.* Cada operación se diseña preguntando si puede romperla:
+
+| Operación | ¿Puede romperla? | Qué se hace |
+|---|---|---|
+| Borrar plan (solo DRAFT) | No: un DRAFT no cuenta | Nada |
+| Archivar plan | Sí, si es el último | 409 |
+| Publicar o restaurar agente | Sí | Se exige un plan publicado |
+| Borrar agente (solo DRAFT) | No: nunca fue público | Se borran sus planes primero y después el agente |
+
+**Orden de las validaciones:** primero el estado y después la invariante. Así, un
+error de estado (INVALID_STATE_TRANSITION) no se disfraza de otro error ni gasta
+una consulta innecesaria.
+
+**Orden de los borrados sin transacción:** primero los hijos (planes) y después el
+padre (agente). Si falla a mitad de camino, queda un DRAFT con menos planes, que
+es un estado válido; al revés quedarían planes huérfanos.

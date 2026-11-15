@@ -77,7 +77,8 @@ public class GlobalErrorHandler extends ResponseEntityExceptionHandler {
             case SLUG_ALREADY_EXISTS,
                  PLAN_HAS_NO_VALID_PRICE,
                  AGENT_HAS_NO_PUBLISHED_PLAN,
-                 INVALID_STATE_TRANSITION -> HttpStatus.CONFLICT;
+                 INVALID_STATE_TRANSITION,
+                 CANNOT_DELETE_NON_DRAFT -> HttpStatus.CONFLICT;
             case INVALID_PRICE -> HttpStatus.UNPROCESSABLE_ENTITY;
         };
     }

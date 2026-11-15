@@ -17,4 +17,10 @@ public interface PlanGateway {
     Flux<Plan> findPublishedByAgentId(String agentId);
 
     Mono<Plan> save(Plan plan);
+
+    /** Borra el plan con sus precios y features. */
+    Mono<Void> deleteById(String id);
+
+    /** Borra todos los planes del agente (en cualquier estado) con sus precios y features. */
+    Mono<Void> deleteByAgentId(String agentId);
 }

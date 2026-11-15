@@ -1,6 +1,7 @@
 package com.trianova.catalog.domain.plan;
 
 import com.trianova.catalog.domain.common.Money;
+import com.trianova.catalog.domain.common.PublicationStatus;
 import com.trianova.catalog.domain.common.ex.BusinessException;
 import org.junit.jupiter.api.Test;
 
@@ -21,7 +22,7 @@ class PlanTest {
                 .id("p1")
                 .agentId("a1")
                 .name("Pro")
-                .status(PlanStatus.DRAFT)
+                .status(PublicationStatus.DRAFT)
                 .price(monthly("59900"))
                 .createdAt(Instant.now())
                 .build();
@@ -31,7 +32,7 @@ class PlanTest {
     void publishMovesDraftWithPriceToPublished() {
         Plan published = draftPlanWithPrice().publish();
 
-        assertEquals(PlanStatus.PUBLISHED, published.getStatus());
+        assertEquals(PublicationStatus.PUBLISHED, published.getStatus());
     }
 
     @Test
@@ -40,7 +41,7 @@ class PlanTest {
                 .id("p2")
                 .agentId("a1")
                 .name("Free")
-                .status(PlanStatus.DRAFT)
+                .status(PublicationStatus.DRAFT)
                 .createdAt(Instant.now())
                 .build();
 
@@ -54,6 +55,40 @@ class PlanTest {
 
         BusinessException ex = assertThrows(BusinessException.class, published::publish);
         assertEquals(BusinessException.Type.INVALID_STATE_TRANSITION, ex.getType());
+    }
+
+    @Test
+    void archiveMovesPublishedToArchived() {
+        Plan archived = draftPlanWithPrice().publish().archive();
+
+        assertEquals(PublicationStatus.ARCHIVED, archived.getStatus());
+    }
+
+    @Test
+    void archiveFailsFromDraftBecauseItSkipsPublished() {
+        BusinessException ex = assertThrows(BusinessException.class, draftPlanWithPrice()::archive);
+        assertEquals(BusinessException.Type.INVALID_STATE_TRANSITION, ex.getType());
+    }
+
+    @Test
+    void restoreMovesArchivedBackToPublished() {
+        Plan restored = draftPlanWithPrice().publish().archive().restore();
+
+        assertEquals(PublicationStatus.PUBLISHED, restored.getStatus());
+    }
+
+    @Test
+    void restoreFailsWhenNotArchived() {
+        Plan published = draftPlanWithPrice().publish();
+
+        BusinessException ex = assertThrows(BusinessException.class, published::restore);
+        assertEquals(BusinessException.Type.INVALID_STATE_TRANSITION, ex.getType());
+    }
+
+    @Test
+    void onlyDraftIsDeletable() {
+        assertEquals(true, draftPlanWithPrice().isDeletable());
+        assertEquals(false, draftPlanWithPrice().publish().isDeletable());
     }
 
     @Test

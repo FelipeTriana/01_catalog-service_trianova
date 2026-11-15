@@ -1,7 +1,7 @@
 package com.trianova.catalog.web.agent;
 
 import com.trianova.catalog.domain.agent.Agent;
-import com.trianova.catalog.domain.agent.AgentStatus;
+import com.trianova.catalog.domain.common.PublicationStatus;
 import com.trianova.catalog.domain.common.ex.BusinessException;
 import com.trianova.catalog.usecase.agent.AgentUseCase;
 import org.junit.jupiter.api.Test;
@@ -33,7 +33,7 @@ class AgentControllerTest {
     @MockBean
     AgentUseCase agentUseCase;
 
-    private static Agent agent(String id, AgentStatus status) {
+    private static Agent agent(String id, PublicationStatus status) {
         return Agent.builder()
                 .id(id).slug("asistente-ventas").name("Asistente de Ventas")
                 .description("Responde leads").category("SALES")
@@ -44,7 +44,7 @@ class AgentControllerTest {
 
     @Test
     void listsPublishedAgents() {
-        when(agentUseCase.findPublishedAgents()).thenReturn(Flux.just(agent("a1", AgentStatus.PUBLISHED)));
+        when(agentUseCase.findPublishedAgents()).thenReturn(Flux.just(agent("a1", PublicationStatus.PUBLISHED)));
 
         client.get().uri("/api/v1/agents").exchange()
                 .expectStatus().isOk()
@@ -59,13 +59,13 @@ class AgentControllerTest {
     @Test
     void publicDetailUsesPublishedOnlyLookup() {
         when(agentUseCase.findPublishedAgent("asistente-ventas"))
-                .thenReturn(Mono.just(agent("a1", AgentStatus.PUBLISHED)));
+                .thenReturn(Mono.just(agent("a1", PublicationStatus.PUBLISHED)));
 
         client.get().uri("/api/v1/agents/asistente-ventas").exchange()
                 .expectStatus().isOk()
                 .expectBody().jsonPath("$.id").isEqualTo("a1");
 
-        verify(agentUseCase, never()).findAgent(any());
+        verify(agentUseCase).findPublishedAgent("asistente-ventas");
     }
 
     @Test
@@ -85,7 +85,7 @@ class AgentControllerTest {
     @Test
     void adminListsAllAgentsIncludingDrafts() {
         when(agentUseCase.findAllAgents()).thenReturn(Flux.just(
-                agent("a1", AgentStatus.PUBLISHED), agent("a2", AgentStatus.DRAFT)));
+                agent("a1", PublicationStatus.PUBLISHED), agent("a2", PublicationStatus.DRAFT)));
 
         client.get().uri("/api/v1/admin/agents").exchange()
                 .expectStatus().isOk()
@@ -96,7 +96,7 @@ class AgentControllerTest {
 
     @Test
     void createAgentReturns201AndPassesBodyToUseCase() {
-        when(agentUseCase.createAgent(any())).thenReturn(Mono.just(agent("a1", AgentStatus.DRAFT)));
+        when(agentUseCase.createAgent(any())).thenReturn(Mono.just(agent("a1", PublicationStatus.DRAFT)));
 
         client.post().uri("/api/v1/admin/agents")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -158,7 +158,7 @@ class AgentControllerTest {
 
     @Test
     void updateAgentPassesPathIdAndBody() {
-        when(agentUseCase.updateAgent(eq("a1"), any())).thenReturn(Mono.just(agent("a1", AgentStatus.DRAFT)));
+        when(agentUseCase.updateAgent(eq("a1"), any())).thenReturn(Mono.just(agent("a1", PublicationStatus.DRAFT)));
 
         client.put().uri("/api/v1/admin/agents/a1")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -184,7 +184,7 @@ class AgentControllerTest {
 
     @Test
     void archiveAgentReturnsArchived() {
-        when(agentUseCase.archiveAgent("a1")).thenReturn(Mono.just(agent("a1", AgentStatus.ARCHIVED)));
+        when(agentUseCase.archiveAgent("a1")).thenReturn(Mono.just(agent("a1", PublicationStatus.ARCHIVED)));
 
         client.post().uri("/api/v1/admin/agents/a1/archive").exchange()
                 .expectStatus().isOk()
@@ -210,5 +210,46 @@ class AgentControllerTest {
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("INTERNAL_ERROR")
                 .jsonPath("$.detail").isEqualTo("An unexpected error occurred");
+    }
+
+    @Test
+    void restoreAgentReturnsPublished() {
+        when(agentUseCase.restoreAgent("a1")).thenReturn(Mono.just(agent("a1", PublicationStatus.PUBLISHED)));
+
+        client.post().uri("/api/v1/admin/agents/a1/restore").exchange()
+                .expectStatus().isOk()
+                .expectBody().jsonPath("$.status").isEqualTo("PUBLISHED");
+    }
+
+    @Test
+    void restoreAgentWithoutPublishedPlanReturns409() {
+        when(agentUseCase.restoreAgent("a1"))
+                .thenReturn(Mono.error(BusinessException.Type.AGENT_HAS_NO_PUBLISHED_PLAN.build()));
+
+        client.post().uri("/api/v1/admin/agents/a1/restore").exchange()
+                .expectStatus().isEqualTo(409)
+                .expectBody().jsonPath("$.code").isEqualTo("AGENT_HAS_NO_PUBLISHED_PLAN");
+    }
+
+    @Test
+    void deleteDraftAgentReturns204WithoutBody() {
+        when(agentUseCase.deleteAgent("a1")).thenReturn(Mono.empty());
+
+        client.delete().uri("/api/v1/admin/agents/a1").exchange()
+                .expectStatus().isNoContent()
+                .expectBody().isEmpty();
+
+        verify(agentUseCase).deleteAgent("a1");
+    }
+
+    @Test
+    void deleteNonDraftAgentReturns409() {
+        when(agentUseCase.deleteAgent("a1"))
+                .thenReturn(Mono.error(BusinessException.Type.CANNOT_DELETE_NON_DRAFT.build()));
+
+        client.delete().uri("/api/v1/admin/agents/a1").exchange()
+                .expectStatus().isEqualTo(409)
+                .expectHeader().contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody().jsonPath("$.code").isEqualTo("CANNOT_DELETE_NON_DRAFT");
     }
 }

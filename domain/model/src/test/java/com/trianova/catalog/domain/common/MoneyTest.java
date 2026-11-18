@@ -44,4 +44,11 @@ class MoneyTest {
         assertThrows(IllegalArgumentException.class,
                 () -> Money.of(BigDecimal.TEN, "XYZ"));
     }
+
+    @Test
+    void plainAmountUsesCurrencyDigitsWithoutRounding() {
+        assertEquals("59900.00", Money.of(new BigDecimal("59900.0000"), "COP").toPlainAmount());
+        assertEquals("19.995", Money.of(new BigDecimal("19.9950"), "USD").toPlainAmount());
+        assertEquals("100000000.00", Money.of(new BigDecimal("1E+8"), "COP").toPlainAmount());
+    }
 }

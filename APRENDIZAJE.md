@@ -632,3 +632,46 @@ una consulta innecesaria.
 **Orden de los borrados sin transacción:** primero los hijos (planes) y después el
 padre (agente). Si falla a mitad de camino, queda un DRAFT con menos planes, que
 es un estado válido; al revés quedarían planes huérfanos.
+
+## 24. Transactional Outbox: publicar eventos sin perderlos
+
+**Problema:** al cambiar un precio hay que hacer dos cosas: guardar en Postgres y
+avisar a RabbitMQ. Son dos sistemas distintos, y no existe una transacción que
+abarque a los dos. Cualquier orden falla:
+
+- Guardar y después enviar: si RabbitMQ está caído, el precio cambió y nadie se entera.
+- Enviar y después guardar: si el guardado falla, avisaste de un cambio que no existe.
+
+**Solución:** no hablar con RabbitMQ desde el caso de uso. El evento se guarda en
+una tabla `outbox` **de la misma base**, junto con el cambio. Con una transacción
+(llega con el app-service), los dos se confirman o se descartan juntos. Después,
+un proceso aparte (`OutboxRelay`) lee las filas pendientes, las envía y las marca.
+
+```
+caso de uso ──> plans + outbox (misma transacción)
+                         │
+OutboxRelay (cada 2 s) ──┴──> RabbitMQ ──> consumidores
+```
+
+**Piezas:**
+
+| Clase | Rol |
+|---|---|
+| `OutboxEventPublisher` | Implementa el puerto `EventPublisher`: solo inserta en `outbox`. |
+| `EventContract` | Traduce el evento de dominio al JSON del contrato (versión 1). |
+| `OutboxRelay` | Envía un lote en orden y marca cada fila después de la confirmación del broker. |
+| `RabbitEventSender` | Envía con *publisher confirms*: RabbitMQ responde "lo recibí". |
+| `OutboxRelayScheduler` | Repite el relay cada intervalo mientras la app vive. |
+
+**Al menos una vez:** si el relay cae entre la confirmación y la marca, la fila se
+reenvía. Por eso cada evento lleva `eventId`: el consumidor descarta el repetido
+(idempotencia). Es preferible un duplicado detectable a un evento perdido.
+
+**Decisiones:**
+
+- El contrato JSON usa records propios y no los eventos del dominio: un cambio
+  interno no puede alterar sin querer lo que leen otros servicios.
+- `concatMap` y corte en el primer fallo: un evento nunca adelanta a uno anterior.
+- Spring AMQP en lugar de Reactor RabbitMQ (sin mantenimiento desde 2023). El envío
+  bloqueante corre en `boundedElastic`, fuera del camino de las peticiones HTTP.
+- `published_at` en lugar de un booleano: además de "si", dice "cuándo".

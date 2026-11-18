@@ -17,16 +17,38 @@ y **Java 21**. La especificación técnica completa está en
 ```
 domain/
   model/      # Entidades, objetos de valor, enums y puertos (gateways). Java puro, sin Spring.
-  usecase/    # Casos de uso (próximo paso).
+  usecase/    # Casos de uso: AgentUseCase y PlanUseCase.
 infraestructure/
-  entry-points/reactive-web/   # Controllers REST (próximo paso).
+  entry-points/reactive-web/   # Controllers REST, DTOs y errores RFC 7807.
   driven-adapters/
-    r2dbc-repository/          # Persistencia reactiva (próximo paso).
-    rabbitmq/                  # Publicación de eventos vía Outbox (próximo paso).
+    r2dbc-repository/          # Persistencia reactiva en PostgreSQL (migraciones V1 y V2).
+    rabbitmq/                  # Eventos vía Transactional Outbox (migración V3) + relay a RabbitMQ.
     security/                  # Resource server que valida el JWT de Keycloak (próximo paso).
-  helpers/                     # AdapterOperations reactivo (próximo paso).
+  helpers/r2dbc-commons/       # AdapterOperations reactivo.
 applications/app-service/      # Arranque + wiring (próximo paso).
 ```
+
+## Eventos publicados
+
+Exchange topic `trianova.events`. Contrato JSON en `EventContract` (versión 1).
+
+| Routing key | Cuándo |
+|---|---|
+| `catalog.plan.changed` | Plan creado, editado, publicado, archivado, restaurado o borrado (`changeType`). |
+| `catalog.price.updated` | Cambio de precio de un ciclo; lleva `oldAmount` (null si el ciclo es nuevo) y `newAmount`. |
+
+Entrega **al menos una vez**: los consumidores deben descartar duplicados por `eventId`
+(también viaja como `messageId` del mensaje AMQP).
+
+Configuración:
+
+| Propiedad | Default | Uso |
+|---|---|---|
+| `spring.rabbitmq.publisher-confirm-type` | — | **Obligatoria:** `correlated`. Sin confirmaciones el servicio no arranca. |
+| `app.events.exchange` | `trianova.events` | Exchange de destino. |
+| `app.events.relay.interval` | `2s` | Espera entre lotes del relay. |
+| `app.events.relay.batch-size` | `100` | Eventos por lote. |
+| `app.events.relay.enabled` | `true` | Apaga el relay (p. ej. en una instancia solo HTTP). |
 
 **Regla de oro:** las dependencias apuntan siempre hacia adentro (hacia el dominio).
 
@@ -47,5 +69,7 @@ applications/app-service/      # Arranque + wiring (próximo paso).
 
 - [x] Esqueleto multi-módulo en Java 21 (Gradle 8.10).
 - [x] Capa de dominio: `Agent`, `Plan`, `Price`, `Feature`, `Money` + puertos, con pruebas unitarias.
-- [ ] Casos de uso (`AgentUseCase`, `PlanUseCase`).
-- [ ] Adaptadores: REST, R2DBC, RabbitMQ, seguridad.
+- [x] Casos de uso (`AgentUseCase`, `PlanUseCase`).
+- [x] Adaptadores: REST, R2DBC, RabbitMQ (Outbox).
+- [ ] Seguridad (JWT de Keycloak).
+- [ ] app-service: arranque, wiring y transacciones (el Outbox necesita la transacción para ser atómico).

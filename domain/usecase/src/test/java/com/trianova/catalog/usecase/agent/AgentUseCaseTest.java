@@ -3,12 +3,16 @@ package com.trianova.catalog.usecase.agent;
 import com.trianova.catalog.domain.agent.Agent;
 import com.trianova.catalog.domain.agent.gateway.AgentGateway;
 import com.trianova.catalog.domain.common.PublicationStatus;
+import com.trianova.catalog.domain.common.event.DomainEvent;
+import com.trianova.catalog.domain.common.event.EventPublisher;
 import com.trianova.catalog.domain.common.ex.BusinessException;
 import com.trianova.catalog.domain.plan.Plan;
+import com.trianova.catalog.domain.plan.event.PlanChanged;
 import com.trianova.catalog.domain.plan.gateway.PlanGateway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -17,12 +21,16 @@ import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.time.Instant;
+import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -34,6 +42,8 @@ class AgentUseCaseTest {
     AgentGateway agentGateway;
     @Mock
     PlanGateway planGateway;
+    @Mock
+    EventPublisher eventPublisher;
 
     AgentUseCase useCase;
 
@@ -41,7 +51,7 @@ class AgentUseCaseTest {
     void setUp() {
         // Los mocks no ejecutan métodos default: se delega en la implementación real del puerto.
         lenient().when(agentGateway.findByIdOrSlug(anyString())).thenCallRealMethod();
-        useCase = new AgentUseCase(agentGateway, planGateway);
+        useCase = new AgentUseCase(agentGateway, planGateway, eventPublisher);
     }
 
     private Agent draftAgent() {
@@ -222,6 +232,7 @@ class AgentUseCaseTest {
     @Test
     void deleteDraftAgentDeletesItsPlansFirstAndThenTheAgent() {
         when(agentGateway.findById("a1")).thenReturn(Mono.just(draftAgent()));
+        when(planGateway.findByAgentId("a1")).thenReturn(Flux.empty());
         when(planGateway.deleteByAgentId("a1")).thenReturn(Mono.empty());
         when(agentGateway.deleteById("a1")).thenReturn(Mono.empty());
 
@@ -242,6 +253,7 @@ class AgentUseCaseTest {
 
         verify(planGateway, never()).deleteByAgentId(anyString());
         verify(agentGateway, never()).deleteById(anyString());
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test
@@ -251,5 +263,25 @@ class AgentUseCaseTest {
         StepVerifier.create(useCase.deleteAgent("x"))
                 .expectErrorMatches(e -> isError(e, BusinessException.Type.AGENT_NOT_FOUND))
                 .verify();
+    }
+
+    @Test
+    void deleteAgentEmitsDeletedForEachOfItsPlans() {
+        Plan p1 = Plan.builder().id("p1").agentId("a1").name("Starter").status(PublicationStatus.DRAFT).build();
+        Plan p2 = Plan.builder().id("p2").agentId("a1").name("Pro").status(PublicationStatus.PUBLISHED).build();
+        when(agentGateway.findById("a1")).thenReturn(Mono.just(draftAgent()));
+        when(planGateway.findByAgentId("a1")).thenReturn(Flux.just(p1, p2));
+        when(planGateway.deleteByAgentId("a1")).thenReturn(Mono.empty());
+        when(agentGateway.deleteById("a1")).thenReturn(Mono.empty());
+        when(eventPublisher.publish(any())).thenReturn(Mono.empty());
+
+        StepVerifier.create(useCase.deleteAgent("a1")).verifyComplete();
+
+        ArgumentCaptor<DomainEvent> captor = ArgumentCaptor.forClass(DomainEvent.class);
+        verify(eventPublisher, times(2)).publish(captor.capture());
+        assertEquals(List.of("p1", "p2"), captor.getAllValues().stream()
+                .map(e -> ((PlanChanged) e).planId()).toList());
+        assertTrue(captor.getAllValues().stream()
+                .allMatch(e -> ((PlanChanged) e).changeType() == PlanChanged.ChangeType.DELETED));
     }
 }

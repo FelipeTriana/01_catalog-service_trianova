@@ -33,4 +33,15 @@ public record Money(BigDecimal amount, Currency currency) {
     public boolean isPositive() {
         return amount.signum() > 0;
     }
+
+    /**
+     * Monto como texto plano con los decimales propios de la moneda (COP/USD: 2),
+     * sin redondear jamás: si el valor trae más decimales significativos, se conservan.
+     * Es la representación canónica que comparten la API HTTP y los eventos.
+     */
+    public String toPlainAmount() {
+        int currencyDigits = Math.max(currency.getDefaultFractionDigits(), 0);
+        int significantDigits = amount.stripTrailingZeros().scale();
+        return amount.setScale(Math.max(currencyDigits, significantDigits)).toPlainString();
+    }
 }

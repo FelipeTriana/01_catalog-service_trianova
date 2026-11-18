@@ -1,0 +1,36 @@
+// driven-adapters-rabbitmq: implementa el puerto EventPublisher con el patrón
+// Transactional Outbox. El evento se guarda en la tabla outbox (misma base que el
+// cambio de negocio) y un relay lo entrega después al exchange de RabbitMQ.
+plugins {
+    id 'io.spring.dependency-management' version '1.1.6'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.boot:spring-boot-dependencies:3.3.5"
+        mavenBom "org.testcontainers:testcontainers-bom:1.20.3"
+    }
+}
+
+dependencies {
+    implementation project(':domain-model')
+
+    // Escritura y lectura de la tabla outbox (misma conexión R2DBC que el resto del servicio).
+    implementation 'org.springframework.boot:spring-boot-starter-data-r2dbc'
+    runtimeOnly    'org.postgresql:r2dbc-postgresql'
+
+    // Envío a RabbitMQ con confirmaciones del broker (publisher confirms).
+    implementation 'org.springframework.boot:spring-boot-starter-amqp'
+
+    // Serialización del contrato JSON de los eventos.
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+    // Pruebas de integración contra PostgreSQL y RabbitMQ reales (Testcontainers).
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:postgresql'
+    testImplementation 'org.testcontainers:rabbitmq'
+    testImplementation 'org.postgresql:postgresql'          // driver JDBC para Flyway en los tests
+    testImplementation 'org.flywaydb:flyway-core'
+    testImplementation 'org.flywaydb:flyway-database-postgresql'
+}

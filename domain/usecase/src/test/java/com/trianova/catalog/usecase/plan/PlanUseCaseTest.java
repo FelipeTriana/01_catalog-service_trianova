@@ -10,11 +10,14 @@ import com.trianova.catalog.domain.plan.BillingCycle;
 import com.trianova.catalog.domain.plan.Feature;
 import com.trianova.catalog.domain.plan.Plan;
 import com.trianova.catalog.domain.plan.Price;
+import com.trianova.catalog.domain.common.event.DomainEvent;
+import com.trianova.catalog.domain.plan.event.PlanChanged;
 import com.trianova.catalog.domain.plan.event.PriceUpdated;
 import com.trianova.catalog.domain.plan.gateway.PlanGateway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Flux;
@@ -24,6 +27,8 @@ import reactor.test.StepVerifier;
 import java.math.BigDecimal;
 import java.time.Instant;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
@@ -49,6 +54,7 @@ class PlanUseCaseTest {
     void setUp() {
         // Los mocks no ejecutan métodos default: se delega en la implementación real del puerto.
         lenient().when(agentGateway.findByIdOrSlug(anyString())).thenCallRealMethod();
+        lenient().when(eventPublisher.publish(any())).thenReturn(Mono.empty());
         useCase = new PlanUseCase(planGateway, agentGateway, eventPublisher);
     }
 
@@ -294,5 +300,123 @@ class PlanUseCaseTest {
         StepVerifier.create(useCase.deletePlan("x"))
                 .expectErrorMatches(e -> isError(e, BusinessException.Type.PLAN_NOT_FOUND))
                 .verify();
+    }
+
+    // ---- Eventos emitidos ----
+
+    /** El único evento publicado durante el test. */
+    private DomainEvent emitted() {
+        ArgumentCaptor<DomainEvent> captor = ArgumentCaptor.forClass(DomainEvent.class);
+        verify(eventPublisher, times(1)).publish(captor.capture());
+        return captor.getValue();
+    }
+
+    private void assertPlanChanged(PlanChanged.ChangeType expected) {
+        PlanChanged event = (PlanChanged) emitted();
+        assertEquals(expected, event.changeType());
+        assertEquals("a1", event.agentId());
+    }
+
+    private void saveEchoesItsArgument() {
+        when(planGateway.save(any(Plan.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+    }
+
+    @Test
+    void createPlanEmitsCreated() {
+        when(agentGateway.findById("a1")).thenReturn(Mono.just(
+                Agent.builder().id("a1").slug("s").name("n").status(PublicationStatus.DRAFT).build()));
+        saveEchoesItsArgument();
+
+        StepVerifier.create(useCase.createPlan(draftPlanWithPrice())).expectNextCount(1).verifyComplete();
+
+        assertPlanChanged(PlanChanged.ChangeType.CREATED);
+    }
+
+    @Test
+    void updatePlanEmitsUpdated() {
+        when(planGateway.findById("p1")).thenReturn(Mono.just(draftPlanWithPrice()));
+        saveEchoesItsArgument();
+
+        StepVerifier.create(useCase.updatePlan("p1", Plan.builder().name("Pro+").build()))
+                .expectNextCount(1).verifyComplete();
+
+        assertPlanChanged(PlanChanged.ChangeType.UPDATED);
+    }
+
+    @Test
+    void publishPlanEmitsPublished() {
+        when(planGateway.findById("p1")).thenReturn(Mono.just(draftPlanWithPrice()));
+        saveEchoesItsArgument();
+
+        StepVerifier.create(useCase.publishPlan("p1")).expectNextCount(1).verifyComplete();
+
+        assertPlanChanged(PlanChanged.ChangeType.PUBLISHED);
+    }
+
+    @Test
+    void archivePlanEmitsArchived() {
+        when(planGateway.findById("p1")).thenReturn(Mono.just(draftPlanWithPrice().publish()));
+        when(agentGateway.findById("a1")).thenReturn(Mono.empty());
+        saveEchoesItsArgument();
+
+        StepVerifier.create(useCase.archivePlan("p1")).expectNextCount(1).verifyComplete();
+
+        assertPlanChanged(PlanChanged.ChangeType.ARCHIVED);
+    }
+
+    @Test
+    void restorePlanEmitsRestored() {
+        when(planGateway.findById("p1")).thenReturn(Mono.just(draftPlanWithPrice().publish().archive()));
+        saveEchoesItsArgument();
+
+        StepVerifier.create(useCase.restorePlan("p1")).expectNextCount(1).verifyComplete();
+
+        assertPlanChanged(PlanChanged.ChangeType.RESTORED);
+    }
+
+    @Test
+    void deletePlanEmitsDeleted() {
+        when(planGateway.findById("p1")).thenReturn(Mono.just(draftPlanWithPrice()));
+        when(planGateway.deleteById("p1")).thenReturn(Mono.empty());
+
+        StepVerifier.create(useCase.deletePlan("p1")).verifyComplete();
+
+        assertPlanChanged(PlanChanged.ChangeType.DELETED);
+    }
+
+    @Test
+    void changePriceEmitsOldAndNewAmount() {
+        when(planGateway.findById("p1")).thenReturn(Mono.just(draftPlanWithPrice()));
+        saveEchoesItsArgument();
+
+        StepVerifier.create(useCase.changePrice("p1", monthly("69900"))).expectNextCount(1).verifyComplete();
+
+        PriceUpdated event = (PriceUpdated) emitted();
+        assertEquals(new BigDecimal("59900"), event.oldAmount().amount());
+        assertEquals(new BigDecimal("69900"), event.newAmount().amount());
+        assertEquals(BillingCycle.MONTHLY, event.billingCycle());
+    }
+
+    @Test
+    void changePriceForANewCycleHasNoOldAmount() {
+        when(planGateway.findById("p1")).thenReturn(Mono.just(draftPlanWithPrice()));
+        saveEchoesItsArgument();
+        Price yearly = new Price(Money.of(new BigDecimal("599000"), "COP"), BillingCycle.YEARLY);
+
+        StepVerifier.create(useCase.changePrice("p1", yearly)).expectNextCount(1).verifyComplete();
+
+        assertNull(((PriceUpdated) emitted()).oldAmount());
+    }
+
+    @Test
+    void rejectedOperationEmitsNothing() {
+        when(planGateway.findById("p1")).thenReturn(Mono.just(draftPlanWithPrice()));
+
+        StepVerifier.create(useCase.archivePlan("p1"))
+                .expectErrorMatches(e -> e instanceof BusinessException be
+                        && be.getType() == BusinessException.Type.INVALID_STATE_TRANSITION)
+                .verify();
+
+        verify(eventPublisher, never()).publish(any());
     }
 }

@@ -13,7 +13,6 @@ import com.trianova.catalog.web.plan.dto.PlanResponse.PriceResponse;
 import com.trianova.catalog.web.plan.dto.PriceRequest;
 import com.trianova.catalog.web.plan.dto.UpdatePlanRequest;
 
-import java.math.BigDecimal;
 import java.util.List;
 
 /** Traducción entre los DTOs HTTP y el agregado Plan. */
@@ -83,16 +82,9 @@ final class PlanDtoMapper {
         return new FeatureResponse(feature.code(), feature.name(), feature.description(), feature.limitValue());
     }
 
-    /**
-     * Muestra el monto con los decimales propios de la moneda (COP/USD: 2) sin
-     * redondear jamás: si el valor trae más decimales significativos, se conservan.
-     * La base guarda NUMERIC(19,4), así que 59900 llega como 59900.0000 y sale "59900.00".
-     */
+    /** Formato canónico del dominio: el mismo que viaja en los eventos. */
     static String formatAmount(Money money) {
-        BigDecimal amount = money.amount();
-        int currencyDigits = Math.max(money.currency().getDefaultFractionDigits(), 0);
-        int significantDigits = amount.stripTrailingZeros().scale();
-        return amount.setScale(Math.max(currencyDigits, significantDigits)).toPlainString();
+        return money.toPlainAmount();
     }
 
     private static <T> List<T> nullToEmpty(List<T> list) {

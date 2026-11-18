@@ -7,6 +7,8 @@ import com.trianova.catalog.domain.common.event.EventPublisher;
 import com.trianova.catalog.domain.common.ex.BusinessException;
 import com.trianova.catalog.domain.plan.Plan;
 import com.trianova.catalog.domain.plan.Price;
+import com.trianova.catalog.domain.plan.event.PlanChanged;
+import com.trianova.catalog.domain.plan.event.PlanChanged.ChangeType;
 import com.trianova.catalog.domain.plan.event.PriceUpdated;
 import com.trianova.catalog.domain.plan.gateway.PlanGateway;
 import lombok.RequiredArgsConstructor;
@@ -16,8 +18,11 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Casos de uso de planes. changePrice y publishPlan apoyan las transiciones del
- * dominio y, cuando corresponde, emiten eventos a través del EventPublisher.
+ * Casos de uso de planes. Cada operación que cambia un plan lo persiste y luego
+ * emite su evento (catalog.plan.changed o catalog.price.updated) por el EventPublisher.
+ *
+ * Nota de consistencia: guardar y emitir son dos escrituras. Hasta que el app-service
+ * aporte la transacción, un fallo entre ambas deja el cambio sin evento.
  */
 @RequiredArgsConstructor
 public class PlanUseCase {
@@ -42,44 +47,37 @@ public class PlanUseCase {
     public Mono<Plan> createPlan(Plan plan) {
         return agentGateway.findById(plan.getAgentId())
                 .switchIfEmpty(Mono.error(BusinessException.Type.AGENT_NOT_FOUND.defer()))
-                .flatMap(agent -> planGateway.save(plan.toBuilder()
+                .flatMap(agent -> saveAndEmit(plan.toBuilder()
                         .id(UUID.randomUUID().toString())
                         .status(PublicationStatus.DRAFT)
                         .createdAt(Instant.now())
-                        .build()));
+                        .build(), ChangeType.CREATED));
     }
 
     public Mono<Plan> updatePlan(String id, Plan data) {
         return findExisting(id)
-                .flatMap(existing -> planGateway.save(existing.toBuilder()
+                .flatMap(existing -> saveAndEmit(existing.toBuilder()
                         .name(data.getName())
                         .description(data.getDescription())
                         // Semántica PUT: la lista enviada reemplaza a la anterior. Los precios no se tocan (van por /price).
                         .clearFeatures()
                         .features(data.getFeatures())
                         .updatedAt(Instant.now())
-                        .build()));
+                        .build(), ChangeType.UPDATED));
     }
 
-    /** Cambia el precio del ciclo indicado, persiste y emite catalog.price.updated. */
+    /** Cambia el precio del ciclo indicado y emite catalog.price.updated con el monto anterior y el nuevo. */
     public Mono<Plan> changePrice(String planId, Price newPrice) {
         return findExisting(planId)
-                .map(plan -> plan.changePrice(newPrice))
-                .flatMap(planGateway::save)
-                .flatMap(saved -> eventPublisher.publish(new PriceUpdated(
-                                saved.getAgentId(),
-                                saved.getId(),
-                                newPrice.billingCycle(),
-                                newPrice.amount().amount(),
-                                newPrice.amount().currency().getCurrencyCode(),
-                                Instant.now()))
-                        .thenReturn(saved));
+                .flatMap(before -> planGateway.save(before.changePrice(newPrice))
+                        .flatMap(saved -> eventPublisher.publish(PriceUpdated.of(before, newPrice))
+                                .thenReturn(saved)));
     }
 
     public Mono<Plan> publishPlan(String id) {
         return findExisting(id)
                 .map(Plan::publish)
-                .flatMap(planGateway::save);
+                .flatMap(plan -> saveAndEmit(plan, ChangeType.PUBLISHED));
     }
 
     /**
@@ -93,7 +91,7 @@ public class PlanUseCase {
                     Plan archived = plan.archive();
                     return agentKeepsAPublishedPlanWithout(plan)
                             .flatMap(keeps -> Boolean.TRUE.equals(keeps)
-                                    ? planGateway.save(archived)
+                                    ? saveAndEmit(archived, ChangeType.ARCHIVED)
                                     : Mono.<Plan>error(BusinessException.Type.AGENT_HAS_NO_PUBLISHED_PLAN.defer()));
                 });
     }
@@ -102,7 +100,7 @@ public class PlanUseCase {
     public Mono<Plan> restorePlan(String id) {
         return findExisting(id)
                 .map(Plan::restore)
-                .flatMap(planGateway::save);
+                .flatMap(plan -> saveAndEmit(plan, ChangeType.RESTORED));
     }
 
     /**
@@ -113,7 +111,15 @@ public class PlanUseCase {
         return findExisting(id)
                 .filter(Plan::isDeletable)
                 .switchIfEmpty(Mono.error(BusinessException.Type.CANNOT_DELETE_NON_DRAFT.defer()))
-                .flatMap(plan -> planGateway.deleteById(id));
+                .flatMap(plan -> planGateway.deleteById(id)
+                        .then(Mono.defer(() -> eventPublisher.publish(PlanChanged.of(plan, ChangeType.DELETED)))));
+    }
+
+    /** Persiste el plan y, solo si se guardó, emite catalog.plan.changed. */
+    private Mono<Plan> saveAndEmit(Plan plan, ChangeType changeType) {
+        return planGateway.save(plan)
+                .flatMap(saved -> eventPublisher.publish(PlanChanged.of(saved, changeType))
+                        .thenReturn(saved));
     }
 
     /**

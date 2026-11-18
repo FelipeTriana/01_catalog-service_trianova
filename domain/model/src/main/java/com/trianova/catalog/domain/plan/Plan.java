@@ -10,6 +10,7 @@ import lombok.Singular;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Raíz de agregado: un nivel de precio de un agente (p. ej. "Starter", "Pro").
@@ -93,5 +94,10 @@ public class Plan {
 
     public boolean isPublished() {
         return status == PublicationStatus.PUBLISHED;
+    }
+
+    /** Precio vigente para un ciclo, si el plan lo tiene. */
+    public Optional<Price> priceFor(BillingCycle cycle) {
+        return prices.stream().filter(p -> p.billingCycle() == cycle).findFirst();
     }
 }

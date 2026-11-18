@@ -10,6 +10,7 @@ import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PlanTest {
 
@@ -109,5 +110,13 @@ class PlanTest {
         Plan updated = draftPlanWithPrice().changePrice(yearly);
 
         assertEquals(2, updated.getPrices().size());
+    }
+
+    @Test
+    void priceForReturnsThePriceOfThatCycleOrEmpty() {
+        Plan plan = draftPlanWithPrice();
+
+        assertEquals(new BigDecimal("59900"), plan.priceFor(BillingCycle.MONTHLY).orElseThrow().amount().amount());
+        assertTrue(plan.priceFor(BillingCycle.YEARLY).isEmpty());
     }
 }

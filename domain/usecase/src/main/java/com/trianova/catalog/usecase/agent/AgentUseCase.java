@@ -3,13 +3,17 @@ package com.trianova.catalog.usecase.agent;
 import com.trianova.catalog.domain.agent.Agent;
 import com.trianova.catalog.domain.agent.gateway.AgentGateway;
 import com.trianova.catalog.domain.common.PublicationStatus;
+import com.trianova.catalog.domain.common.event.EventPublisher;
 import com.trianova.catalog.domain.common.ex.BusinessException;
+import com.trianova.catalog.domain.plan.Plan;
+import com.trianova.catalog.domain.plan.event.PlanChanged;
 import com.trianova.catalog.domain.plan.gateway.PlanGateway;
 import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import java.util.function.UnaryOperator;
 
@@ -23,6 +27,7 @@ public class AgentUseCase {
 
     private final AgentGateway agentGateway;
     private final PlanGateway planGateway;
+    private final EventPublisher eventPublisher;
 
     public Flux<Agent> findPublishedAgents() {
         return agentGateway.findByStatus(PublicationStatus.PUBLISHED);
@@ -84,13 +89,22 @@ public class AgentUseCase {
      * público, así que ningún cliente pudo suscribirse a ellos. Primero los planes
      * y luego el agente: si algo falla a mitad, queda un DRAFT con menos planes
      * (estado válido) y no planes huérfanos. Reintentar completa la operación.
+     * Al final emite DELETED por cada plan borrado: los consumidores recibieron su CREATED.
      */
     public Mono<Void> deleteAgent(String id) {
         return findExisting(id)
                 .filter(Agent::isDeletable)
                 .switchIfEmpty(Mono.error(BusinessException.Type.CANNOT_DELETE_NON_DRAFT.defer()))
-                .flatMap(agent -> planGateway.deleteByAgentId(id)
-                        .then(Mono.defer(() -> agentGateway.deleteById(id))));
+                .flatMap(agent -> planGateway.findByAgentId(id).collectList())
+                .flatMap(plans -> planGateway.deleteByAgentId(id)
+                        .then(Mono.defer(() -> agentGateway.deleteById(id)))
+                        .then(Mono.defer(() -> emitDeleted(plans))));
+    }
+
+    private Mono<Void> emitDeleted(List<Plan> plans) {
+        return Flux.fromIterable(plans)
+                .concatMap(plan -> eventPublisher.publish(PlanChanged.of(plan, PlanChanged.ChangeType.DELETED)))
+                .then();
     }
 
     /**
